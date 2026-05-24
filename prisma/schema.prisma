@@ -1,0 +1,244 @@
+// Exam Management System — data model
+// Roles + access gating (admin dashboard), question bank, exams,
+// submissions and per-answer auto/manual scoring. Grading scale defaults
+// to /20 (Lebanese MEHE standard) and is configurable per exam.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // url = the pooled connection (used at runtime, incl. serverless on Vercel).
+  // directUrl = the direct, non-pooled connection (used for db push / migrate).
+  // Locally both point at the same Postgres; on Neon they differ.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  SCHOOL_ADMIN // restricted admin scoped to a single school (manages its branding + users)
+  TEACHER
+  STUDENT
+}
+
+// Admin grants access: new users are PENDING until approved.
+enum AccessStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+}
+
+enum QuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+  ESSAY
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum SubmissionStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  name         String
+  email        String       @unique
+  passwordHash String
+  role         Role         @default(TEACHER)
+  accessStatus AccessStatus @default(PENDING)
+  language     String       @default("en") // en | fr | ar
+  gradeLevel   String? // student's grade/class, e.g. "Grade 9" (MEHE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  schoolId String?
+  school   School? @relation(fields: [schoolId], references: [id])
+
+  questions   Question[]   @relation("AuthoredQuestions")
+  exams       Exam[]       @relation("CreatedExams")
+  submissions Submission[]
+}
+
+// Single-row app branding (used as a fallback when a user/exam has no school).
+model AppSetting {
+  id          String   @id @default("singleton")
+  schoolName  String?
+  logoDataUrl String? // data URL (e.g. "data:image/png;base64,...")
+  updatedAt   DateTime @updatedAt
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+// A purchase placed from the public cart, paid manually via Whish Money.
+model Order {
+  id         String      @id @default(cuid())
+  name       String
+  email      String
+  schoolName String?
+  schools    Int         @default(1) // number of school licenses
+  amount     Float // total amount due
+  currency   String      @default("USD")
+  reference  String? // Whish Money transaction reference entered by the buyer
+  proofUrl   String? // screenshot of the Whish Money payment (data URL)
+  status     OrderStatus @default(PENDING)
+  createdAt  DateTime    @default(now())
+}
+
+// Messages submitted via the public "Contact us" form.
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String?
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// A school groups its own teachers, students, and exams (with its own branding).
+model School {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  logoDataUrl String? // per-school logo (data URL)
+  themeColor  String? // brand color (hex, e.g. "#1d4ed8") — auto-derived from logo
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+  exams Exam[]
+}
+
+// Official MEHE subjects (multilingual labels).
+model Subject {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  nameAr    String?
+  nameFr    String?
+  questions Question[]
+  exams     Exam[]
+}
+
+model Question {
+  id            String       @id @default(cuid())
+  type          QuestionType
+  difficulty    Difficulty   @default(MEDIUM)
+  text          String
+  imageUrl      String? // optional question image (data URL)
+  options       Json? // MCQ: ["A", "B", ...]; null otherwise
+  correctAnswer String? // MCQ: option value; TRUE_FALSE: "true"/"false"
+  modelAnswer   String? // reference answer / rubric for AI grading of open questions
+  points        Float        @default(1)
+  required      Boolean      @default(false) // student must answer before submitting
+  language      String       @default("en")
+
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("AuthoredQuestions", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  examQuestions ExamQuestion[]
+  answers       Answer[]
+
+  @@index([subjectId, difficulty, type])
+}
+
+model Exam {
+  id               String     @id @default(cuid())
+  title            String
+  description      String?
+  status           ExamStatus @default(DRAFT)
+  totalMarks       Float      @default(20) // final score scaled to this (Lebanese /20)
+  difficultyConfig Json? // auto-generation mix, e.g. {"easy":40,"medium":40,"hard":20}
+  durationMins     Int?
+  language         String     @default("en")
+  revealAnswers    Boolean    @default(false) // show correct answers to students after grading
+
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+
+  schoolId String?
+  school   School? @relation(fields: [schoolId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("CreatedExams", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  examQuestions ExamQuestion[]
+  submissions   Submission[]
+}
+
+// Join table: questions placed in an exam, with ordering and optional point override.
+model ExamQuestion {
+  id         String   @id @default(cuid())
+  examId     String
+  exam       Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+  order      Int      @default(0)
+  points     Float? // overrides Question.points for this exam if set
+
+  @@unique([examId, questionId])
+}
+
+model Submission {
+  id          String           @id @default(cuid())
+  examId      String
+  exam        Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     User             @relation(fields: [studentId], references: [id])
+  status      SubmissionStatus @default(IN_PROGRESS)
+  startedAt   DateTime         @default(now())
+  submittedAt DateTime?
+  gradedAt    DateTime?
+
+  totalAutoScore  Float? // sum of per-answer autoScore (raw points)
+  totalFinalScore Float? // sum of per-answer finalScore (raw points, after teacher edits)
+  scaledScore     Float? // totalFinalScore scaled to exam.totalMarks (e.g. /20)
+  overrideScore   Float? // teacher-set final mark; overrides scaledScore when present
+  released        Boolean @default(false) // results visible to the student
+
+  answers Answer[]
+
+  @@unique([examId, studentId])
+}
+
+model Answer {
+  id           String     @id @default(cuid())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question   @relation(fields: [questionId], references: [id])
+  response     String? // student's answer
+  autoScore    Float? // system-suggested score (raw points)
+  finalScore   Float? // teacher-editable; defaults to autoScore
+  feedback     String?
+  aiGraded     Boolean    @default(false)
+
+  @@unique([submissionId, questionId])
+}

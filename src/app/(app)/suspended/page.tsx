@@ -1,0 +1,31 @@
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/dal";
+import { LogoutButton } from "@/components/logout-button";
+import { Card, CardBody } from "@/components/ui";
+
+export default async function SuspendedPage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  return (
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <Card className="w-full max-w-md">
+        <CardBody className="text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-2xl">
+            🚫
+          </div>
+          <h1 className="text-lg font-semibold text-gray-900">
+            Access suspended
+          </h1>
+          <p className="mt-2 text-sm text-gray-500">
+            Your access to the system has been suspended. Please contact an
+            administrator if you believe this is a mistake.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <LogoutButton />
+          </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
