@@ -13,19 +13,24 @@ export type SessionPayload = {
 const COOKIE_NAME = "session";
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
-const secret = process.env.AUTH_SECRET;
-if (!secret) {
-  // Fail loud at boot rather than silently signing with an empty key.
-  throw new Error("AUTH_SECRET is not set. Add it to your .env file.");
+// Resolve the signing key lazily. Importing this module must never throw —
+// route modules are evaluated during `next build` (page-data collection), where
+// throwing at import time fails the build. We only need the secret when a
+// session is actually signed or verified (at runtime, where it's set).
+function encodedKey(): Uint8Array {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    throw new Error("AUTH_SECRET is not set. Add it to your environment.");
+  }
+  return new TextEncoder().encode(secret);
 }
-const encodedKey = new TextEncoder().encode(secret);
 
 export async function encrypt(payload: SessionPayload): Promise<string> {
   return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(encodedKey);
+    .sign(encodedKey());
 }
 
 export async function decrypt(
@@ -33,7 +38,7 @@ export async function decrypt(
 ): Promise<SessionPayload | null> {
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, encodedKey, {
+    const { payload } = await jwtVerify(token, encodedKey(), {
       algorithms: ["HS256"],
     });
     return payload as SessionPayload;
