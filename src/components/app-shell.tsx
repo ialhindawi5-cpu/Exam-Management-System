@@ -34,12 +34,12 @@ export async function AppShell({
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-6">
-            <span className="flex items-center gap-2 text-base font-bold text-gray-900">
+            <span className="flex min-w-0 items-center gap-2 text-base font-bold text-gray-900">
               {logoDataUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoDataUrl} alt="Logo" className="h-8 w-8 rounded object-contain" />
+                <img src={logoDataUrl} alt="Logo" className="h-8 w-8 shrink-0 rounded object-contain" />
               )}
-              {schoolName || "Exam System"}
+              <span className="truncate">{schoolName || "Exam System"}</span>
             </span>
             <NavLinks items={nav} />
           </div>

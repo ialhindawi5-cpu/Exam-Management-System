@@ -90,11 +90,11 @@ export default async function HomePage() {
 
       {/* Hero */}
       <section className="bg-gradient-to-b from-blue-50 to-white">
-        <div className="mx-auto max-w-6xl px-4 py-20 text-center">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:py-20 text-center">
           <span className="inline-block rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-brand">
             {heroBadge}
           </span>
-          <h1 className="mx-auto mt-5 max-w-3xl text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
+          <h1 className="mx-auto mt-5 max-w-3xl text-3xl font-bold tracking-tight text-gray-900 sm:text-5xl">
             {heroTitle}
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-gray-600">{heroSubtitle}</p>
@@ -116,7 +116,7 @@ export default async function HomePage() {
       </section>
 
       {/* Features */}
-      <section id="features" className="scroll-mt-20 py-20">
+      <section id="features" className="scroll-mt-20 py-14 sm:py-20">
         <div className="mx-auto max-w-6xl px-4">
           <h2 className="text-center text-3xl font-bold text-gray-900">{featuresTitle}</h2>
           <p className="mx-auto mt-2 max-w-2xl text-center text-gray-600">
@@ -138,7 +138,7 @@ export default async function HomePage() {
       </section>
 
       {/* Demo / How it works */}
-      <section id="demo" className="scroll-mt-20 bg-gray-50 py-20">
+      <section id="demo" className="scroll-mt-20 bg-gray-50 py-14 sm:py-20">
         <div className="mx-auto max-w-6xl px-4">
           <h2 className="text-center text-3xl font-bold text-gray-900">{stepsTitle}</h2>
           <p className="mx-auto mt-2 max-w-2xl text-center text-gray-600">
@@ -167,7 +167,7 @@ export default async function HomePage() {
       </section>
 
       {/* About */}
-      <section id="about" className="scroll-mt-20 py-20">
+      <section id="about" className="scroll-mt-20 py-14 sm:py-20">
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 lg:grid-cols-2">
           <div>
             <h2 className="text-3xl font-bold text-gray-900">{aboutTitle}</h2>
@@ -190,7 +190,7 @@ export default async function HomePage() {
       </section>
 
       {/* Contact */}
-      <section id="contact" className="scroll-mt-20 bg-gray-50 py-20">
+      <section id="contact" className="scroll-mt-20 bg-gray-50 py-14 sm:py-20">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 lg:grid-cols-2">
           <div>
             <h2 className="text-3xl font-bold text-gray-900">{contactTitle}</h2>

@@ -3,6 +3,10 @@ import { getSettings } from "@/lib/settings";
 import { BILLING_NOTE, formatMoney, PRICE_PER_SCHOOL } from "@/lib/pricing";
 import { CartClient } from "./cart-client";
 
+// Render on request so the build never needs a DB connection to prerender this
+// page, and so branding (logo/name) reflects live edits.
+export const dynamic = "force-dynamic";
+
 export default async function CartPage() {
   const settings = await getSettings();
   const brandName = settings.schoolName ?? "Exam Management System";
