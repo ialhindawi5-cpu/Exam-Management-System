@@ -123,6 +123,30 @@ function logoItemRequest(opts: { logoUrl: string; logoAlt: string }) {
   };
 }
 
+// Insert the school logo at the top of the form (index 0) as its own request.
+// Best-effort: Google fetches the image server-side, so an unreachable URL (e.g.
+// a protected/preview host) throws — we log and move on rather than fail the
+// whole form.
+async function addLogoBestEffort(opts: {
+  accessToken: string;
+  formId: string;
+  logoUrl: string;
+  logoAlt: string;
+}): Promise<void> {
+  try {
+    await formsFetch(opts.accessToken, `/forms/${opts.formId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({
+        requests: [
+          logoItemRequest({ logoUrl: opts.logoUrl, logoAlt: opts.logoAlt }),
+        ],
+      }),
+    });
+  } catch (e) {
+    console.error("Embedding school logo failed (non-fatal):", e);
+  }
+}
+
 // Create a brand-new quiz form for the exam and populate its questions.
 // When `logoUrl` is set, the school's logo is inserted as the first form item
 // so the quiz is visually branded (Google Forms' API can't set the form's
@@ -163,23 +187,24 @@ export async function createExamForm(opts: {
       },
     });
   }
-  if (opts.logoUrl) {
-    requests.push(
-      logoItemRequest({
-        logoUrl: opts.logoUrl,
-        logoAlt: opts.logoAlt ?? "School logo",
-      }),
-    );
-  }
-  // When the logo occupies index 0, questions start at 1.
-  requests.push(
-    ...createItemRequests(opts.questions, opts.logoUrl ? 1 : 0),
-  );
+  requests.push(...createItemRequests(opts.questions, 0));
 
   await formsFetch(opts.accessToken, `/forms/${created.formId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({ requests }),
   });
+
+  // Brand the form with the school logo at the top — best-effort and in its own
+  // request, so a fetch failure (e.g. the image URL isn't publicly reachable by
+  // Google's servers) never blocks form creation.
+  if (opts.logoUrl) {
+    await addLogoBestEffort({
+      accessToken: opts.accessToken,
+      formId: created.formId,
+      logoUrl: opts.logoUrl,
+      logoAlt: opts.logoAlt ?? "School logo",
+    });
+  }
 
   // Collect respondent emails by default, so the teacher can tell whose answers
   // are whose. Best-effort — never fail form creation over this. The teacher can
@@ -314,22 +339,22 @@ export async function rebuildFormItems(opts: {
       },
     });
   }
-  if (opts.logoUrl) {
-    requests.push(
-      logoItemRequest({
-        logoUrl: opts.logoUrl,
-        logoAlt: opts.logoAlt ?? "School logo",
-      }),
-    );
-  }
-  requests.push(
-    ...createItemRequests(opts.questions, opts.logoUrl ? 1 : 0),
-  );
+  requests.push(...createItemRequests(opts.questions, 0));
 
   await formsFetch(opts.accessToken, `/forms/${opts.formId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({ requests }),
   });
+
+  // Re-apply the school logo at the top — best-effort (see addLogoBestEffort).
+  if (opts.logoUrl) {
+    await addLogoBestEffort({
+      accessToken: opts.accessToken,
+      formId: opts.formId,
+      logoUrl: opts.logoUrl,
+      logoAlt: opts.logoAlt ?? "School logo",
+    });
+  }
   // Note: re-sync intentionally leaves the email-collection setting untouched,
   // so it never overrides the teacher's choice.
 }
