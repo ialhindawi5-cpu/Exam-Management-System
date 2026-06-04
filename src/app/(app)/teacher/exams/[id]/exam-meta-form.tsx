@@ -49,13 +49,18 @@ export function ExamMetaForm({
               <Input id="title" name="title" defaultValue={exam.title} required />
             </div>
             <div>
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">Description / instructions</Label>
               <Textarea
                 id="description"
                 name="description"
-                rows={2}
+                rows={4}
                 defaultValue={exam.description ?? ""}
+                placeholder="e.g. Read each question carefully. No calculators allowed."
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Shown at the top of the generated Google Form, below the
+                auto-added school name, total marks and duration.
+              </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>

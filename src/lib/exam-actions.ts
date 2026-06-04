@@ -69,6 +69,35 @@ async function resolveLogoForExam(exam: {
   };
 }
 
+// Build the text shown at the top of the generated Google Form: an auto info
+// line (school · total marks · duration) followed by the teacher's own
+// description/instructions (or a sensible default). Used everywhere a form's
+// description is set so create, re-sync, publish and close stay consistent.
+async function buildFormDescription(exam: {
+  schoolId: string | null;
+  totalMarks: number;
+  durationMins: number | null;
+  description: string | null;
+}): Promise<string> {
+  let schoolName: string | null = null;
+  if (exam.schoolId) {
+    const school = await prisma.school.findUnique({
+      where: { id: exam.schoolId },
+      select: { name: true },
+    });
+    schoolName = school?.name ?? null;
+  }
+  const infoLine = [
+    schoolName,
+    `Total marks: ${exam.totalMarks}`,
+    exam.durationMins ? `Duration: ${exam.durationMins} min` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const custom = exam.description?.trim() || "Answer all questions.";
+  return infoLine ? `${infoLine}\n\n${custom}` : custom;
+}
+
 // Coerce a question's stored `keywords` Json into a clean rubric array.
 function parseDbKeywords(raw: unknown): { text: string; points: number }[] {
   if (!Array.isArray(raw)) return [];
@@ -283,6 +312,7 @@ export async function setExamStatus(examId: string, status: ExamStatus) {
       const account = await getGoogleAccount(teacher.id);
       if (account) {
         const accessToken = await getValidAccessToken(teacher.id);
+        const formDescription = await buildFormDescription(exam);
 
         if (status === "PUBLISHED" && !exam.googleFormId) {
           // First publish with no form yet → generate one from the questions.
@@ -292,7 +322,7 @@ export async function setExamStatus(examId: string, status: ExamStatus) {
             const form = await createExamForm({
               accessToken,
               title: exam.title,
-              description: exam.description,
+              description: formDescription,
               questions,
               logoUrl: logo?.logoUrl ?? null,
               logoAlt: logo?.logoAlt ?? null,
@@ -314,7 +344,7 @@ export async function setExamStatus(examId: string, status: ExamStatus) {
             accessToken,
             formId: exam.googleFormId,
             closed: status !== "PUBLISHED",
-            description: exam.description,
+            description: formDescription,
           });
         }
       }
@@ -350,12 +380,13 @@ export async function createOrSyncGoogleForm(
   try {
     const accessToken = await getValidAccessToken(teacher.id);
     const logo = await resolveLogoForExam(exam);
+    const formDescription = await buildFormDescription(exam);
     if (exam.googleFormId) {
       // Re-sync: rebuild the form's questions; this clears any released key.
       await rebuildFormItems({
         accessToken,
         formId: exam.googleFormId,
-        description: exam.description,
+        description: formDescription,
         questions,
         logoUrl: logo?.logoUrl ?? null,
         logoAlt: logo?.logoAlt ?? null,
@@ -371,7 +402,7 @@ export async function createOrSyncGoogleForm(
     const form = await createExamForm({
       accessToken,
       title: exam.title,
-      description: exam.description,
+      description: formDescription,
       questions,
       logoUrl: logo?.logoUrl ?? null,
       logoAlt: logo?.logoAlt ?? null,
