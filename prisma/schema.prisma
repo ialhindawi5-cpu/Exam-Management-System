@@ -221,7 +221,3 @@ model ExamQuestion {
 
   @@unique([examId, questionId])
 }
-$env:DATABASE_URL = "PASTE_DATABASE_URL_HERE"
-$env:DIRECT_URL = "PASTE_DIRECT_URL_HERE"
-npx prisma db push
-
