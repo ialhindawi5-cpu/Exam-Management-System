@@ -12,7 +12,6 @@ export type SchoolRow = {
   logoDataUrl: string | null;
   themeColor: string | null;
   teachers: number;
-  students: number;
   exams: number;
 };
 
@@ -29,6 +28,48 @@ export function SchoolsManager({ schools }: { schools: SchoolRow[] }) {
   // Reset the add form after a successful create.
   if (state?.ok && formRef.current) formRef.current.reset();
 
+  // Shared per-row markup — reused by the desktop table and the mobile cards.
+  const schoolName = (s: SchoolRow) => (
+    <div className="flex items-center gap-2">
+      {s.logoDataUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={s.logoDataUrl}
+          alt={s.name}
+          className="h-8 w-8 shrink-0 rounded object-contain"
+        />
+      )}
+      <span
+        className="h-4 w-4 shrink-0 rounded-full border border-gray-200"
+        style={{ backgroundColor: s.themeColor ?? "#1d4ed8" }}
+        title={s.themeColor ?? "default"}
+      />
+      <span className="font-medium text-gray-900">{s.name}</span>
+    </div>
+  );
+
+  const actions = (s: SchoolRow) => (
+    <>
+      <Link href={`/admin/schools/${s.id}`}>
+        <Button variant="secondary">Edit</Button>
+      </Link>
+      <Button
+        variant="danger"
+        disabled={delPending}
+        onClick={() => {
+          setDelError(null);
+          if (!confirm(`Delete "${s.name}"?`)) return;
+          startDelete(async () => {
+            const res = await deleteSchool(s.id);
+            if (res?.error) setDelError(res.error);
+          });
+        }}
+      >
+        Delete
+      </Button>
+    </>
+  );
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div>
@@ -37,13 +78,13 @@ export function SchoolsManager({ schools }: { schools: SchoolRow[] }) {
             {delError}
           </p>
         )}
-        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        {/* Desktop / tablet: table */}
+        <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white md:block">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-3">School</th>
                 <th className="px-4 py-3">Teachers</th>
-                <th className="px-4 py-3">Students</th>
                 <th className="px-4 py-3">Exams</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -51,59 +92,49 @@ export function SchoolsManager({ schools }: { schools: SchoolRow[] }) {
             <tbody className="divide-y divide-gray-100">
               {schools.map((s) => (
                 <tr key={s.id}>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {s.logoDataUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={s.logoDataUrl}
-                          alt={s.name}
-                          className="h-8 w-8 rounded object-contain"
-                        />
-                      )}
-                      <span
-                        className="h-4 w-4 shrink-0 rounded-full border border-gray-200"
-                        style={{ backgroundColor: s.themeColor ?? "#1d4ed8" }}
-                        title={s.themeColor ?? "default"}
-                      />
-                      <span className="font-medium text-gray-900">{s.name}</span>
-                    </div>
-                  </td>
+                  <td className="px-4 py-3">{schoolName(s)}</td>
                   <td className="px-4 py-3"><Badge color="blue">{s.teachers}</Badge></td>
-                  <td className="px-4 py-3"><Badge color="green">{s.students}</Badge></td>
                   <td className="px-4 py-3"><Badge color="gray">{s.exams}</Badge></td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
-                      <Link href={`/admin/schools/${s.id}`}>
-                        <Button variant="secondary">Edit</Button>
-                      </Link>
-                      <Button
-                        variant="danger"
-                        disabled={delPending}
-                        onClick={() => {
-                          setDelError(null);
-                          if (!confirm(`Delete "${s.name}"?`)) return;
-                          startDelete(async () => {
-                            const res = await deleteSchool(s.id);
-                            if (res?.error) setDelError(res.error);
-                          });
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
+                    <div className="flex justify-end gap-2">{actions(s)}</div>
                   </td>
                 </tr>
               ))}
               {schools.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
+                  <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
                     No schools yet. Add your first one.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: stacked cards */}
+        <div className="space-y-3 md:hidden">
+          {schools.map((s) => (
+            <div
+              key={s.id}
+              className="rounded-xl border border-gray-200 bg-white p-4"
+            >
+              {schoolName(s)}
+              <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                <span className="flex items-center gap-1 text-gray-600">
+                  Teachers <Badge color="blue">{s.teachers}</Badge>
+                </span>
+                <span className="flex items-center gap-1 text-gray-600">
+                  Exams <Badge color="gray">{s.exams}</Badge>
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">{actions(s)}</div>
+            </div>
+          ))}
+          {schools.length === 0 && (
+            <p className="rounded-xl border border-gray-200 bg-white px-4 py-6 text-center text-gray-500">
+              No schools yet. Add your first one.
+            </p>
+          )}
         </div>
       </div>
 

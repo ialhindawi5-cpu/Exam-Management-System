@@ -12,7 +12,7 @@ export default async function TeacherDashboard() {
       where: { createdById: teacher.id },
       orderBy: { updatedAt: "desc" },
       take: 5,
-      include: { _count: { select: { submissions: true, examQuestions: true } } },
+      include: { _count: { select: { examQuestions: true } } },
     }),
   ]);
 
@@ -73,7 +73,7 @@ export default async function TeacherDashboard() {
               <div>
                 <span className="font-medium text-gray-900">{e.title}</span>
                 <span className="ml-2 text-sm text-gray-500">
-                  {e._count.examQuestions} questions · {e._count.submissions} submissions
+                  {e._count.examQuestions} questions
                 </span>
               </div>
               <Badge

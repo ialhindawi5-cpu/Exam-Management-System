@@ -4,15 +4,110 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/dal";
+import {
+  getGoogleAccount,
+  getValidAccessToken,
+  googleConfigured,
+} from "@/lib/google";
+import {
+  createExamForm,
+  rebuildFormItems,
+  releaseAnswerKey as pushAnswerKey,
+  listFormResponses,
+  setEmailCollection,
+  setFormResponsesClosed,
+  type FormQuestionInput,
+  type ExamResponse,
+} from "@/lib/google-forms";
 import type { Difficulty, ExamStatus, Prisma } from "@prisma/client";
 
 export type ExamFormState = { error?: string } | undefined;
+
+// A response question enriched with our DB rubric: the title comes from the
+// form, max points + the keyword rubric come from the exam's stored question.
+export type ExamResponseQuestion = {
+  index: number;
+  title: string;
+  maxPoints: number;
+  keywords: { text: string; points: number }[];
+};
+
+// Result of loading a Google Form's responses for display. `needsReconnect`
+// signals the teacher granted Google access before the responses scope existed
+// and must reconnect their account.
+export type ExamResponsesResult =
+  | { ok: true; questions: ExamResponseQuestion[]; responses: ExamResponse[] }
+  | { error: string; needsReconnect?: boolean };
+
+// Public origin where this app is reachable. Used to build URLs that Google's
+// servers must fetch — e.g. the school logo embedded into a generated form.
+// Returns null when neither is set (typical local dev), in which case external
+// fetchers can't reach us and the logo is simply skipped.
+function appBaseUrl(): string | null {
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  }
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return null;
+}
+
+// Resolve the public logo URL for an exam's school, or null if there's nothing
+// to embed (no school, no logo on file, or no public base URL).
+async function resolveLogoForExam(exam: {
+  schoolId: string | null;
+}): Promise<{ logoUrl: string; logoAlt: string } | null> {
+  const base = appBaseUrl();
+  if (!base || !exam.schoolId) return null;
+  const school = await prisma.school.findUnique({
+    where: { id: exam.schoolId },
+    select: { name: true, logoDataUrl: true },
+  });
+  if (!school?.logoDataUrl) return null;
+  return {
+    logoUrl: `${base}/api/branding/logo/${exam.schoolId}`,
+    logoAlt: school.name,
+  };
+}
+
+// Coerce a question's stored `keywords` Json into a clean rubric array.
+function parseDbKeywords(raw: unknown): { text: string; points: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((k) => {
+      const obj = (k ?? {}) as { text?: unknown; points?: unknown };
+      const text = String(obj.text ?? "").trim();
+      const points = Number(obj.points);
+      return { text, points: Number.isFinite(points) && points >= 0 ? points : 0 };
+    })
+    .filter((k) => k.text.length > 0);
+}
 
 // Ensure the exam exists and belongs to the current teacher.
 async function ownedExam(examId: string, teacherId: string) {
   const exam = await prisma.exam.findUnique({ where: { id: examId } });
   if (!exam || exam.createdById !== teacherId) return null;
   return exam;
+}
+
+// Load an exam's questions, in order, shaped for the Google Forms client.
+async function loadFormQuestions(examId: string): Promise<FormQuestionInput[]> {
+  const eqs = await prisma.examQuestion.findMany({
+    where: { examId },
+    orderBy: { order: "asc" },
+    include: { question: true },
+  });
+  return eqs.map((eq) => {
+    const opts = eq.question.options;
+    return {
+      type: eq.question.type,
+      text: eq.question.text,
+      options: Array.isArray(opts) ? (opts as string[]) : null,
+      correctAnswer: eq.question.correctAnswer,
+      points: eq.points ?? eq.question.points,
+      required: eq.question.required,
+      language: eq.question.language,
+    };
+  });
 }
 
 export async function createExam(
@@ -68,7 +163,6 @@ export async function updateExamMeta(
       language: (formData.get("language") as string) || "en",
       totalMarks,
       durationMins: durationMins && durationMins > 0 ? durationMins : null,
-      revealAnswers: formData.get("revealAnswers") === "on",
     },
   });
   revalidatePath(`/teacher/exams/${examId}`);
@@ -180,16 +274,251 @@ export async function setExamStatus(examId: string, status: ExamStatus) {
     }
   }
   await prisma.exam.update({ where: { id: examId }, data: { status } });
+
+  // Keep the Google Form (if any) in sync with the exam's published state. All
+  // form work is best-effort: a Google failure must never block the status
+  // change — the teacher can retry from the exam page.
+  if (googleConfigured()) {
+    try {
+      const account = await getGoogleAccount(teacher.id);
+      if (account) {
+        const accessToken = await getValidAccessToken(teacher.id);
+
+        if (status === "PUBLISHED" && !exam.googleFormId) {
+          // First publish with no form yet → generate one from the questions.
+          const questions = await loadFormQuestions(examId);
+          if (questions.length > 0) {
+            const logo = await resolveLogoForExam(exam);
+            const form = await createExamForm({
+              accessToken,
+              title: exam.title,
+              description: exam.description,
+              questions,
+              logoUrl: logo?.logoUrl ?? null,
+              logoAlt: logo?.logoAlt ?? null,
+            });
+            await prisma.exam.update({
+              where: { id: examId },
+              data: {
+                googleFormId: form.formId,
+                googleFormUrl: form.responderUri,
+                googleFormEditUrl: form.editUrl,
+                googleFormCreatedAt: new Date(),
+              },
+            });
+          }
+        } else if (exam.googleFormId) {
+          // A form already exists → reflect the new state on it. Publishing
+          // (re)opens the form; unpublishing (DRAFT) or closing marks it closed.
+          await setFormResponsesClosed({
+            accessToken,
+            formId: exam.googleFormId,
+            closed: status !== "PUBLISHED",
+            description: exam.description,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Syncing Google Form to exam status failed:", e);
+    }
+  }
+
   revalidatePath(`/teacher/exams/${examId}`);
   revalidatePath("/teacher/exams");
   return { ok: true };
+}
+
+// Create the exam's Google Form (or re-sync its questions if one exists).
+// Returns the responder URL students use to take the exam.
+export async function createOrSyncGoogleForm(
+  examId: string,
+): Promise<{ ok: true; url: string | null } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  if (!googleConfigured()) {
+    return { error: "Google Forms is not configured on the server." };
+  }
+  const account = await getGoogleAccount(teacher.id);
+  if (!account) return { error: "Connect your Google account first." };
+
+  const questions = await loadFormQuestions(examId);
+  if (questions.length === 0) {
+    return { error: "Add at least one question before generating the form." };
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(teacher.id);
+    const logo = await resolveLogoForExam(exam);
+    if (exam.googleFormId) {
+      // Re-sync: rebuild the form's questions; this clears any released key.
+      await rebuildFormItems({
+        accessToken,
+        formId: exam.googleFormId,
+        description: exam.description,
+        questions,
+        logoUrl: logo?.logoUrl ?? null,
+        logoAlt: logo?.logoAlt ?? null,
+      });
+      await prisma.exam.update({
+        where: { id: examId },
+        data: { answerKeyReleasedAt: null },
+      });
+      revalidatePath(`/teacher/exams/${examId}`);
+      return { ok: true, url: exam.googleFormUrl };
+    }
+
+    const form = await createExamForm({
+      accessToken,
+      title: exam.title,
+      description: exam.description,
+      questions,
+      logoUrl: logo?.logoUrl ?? null,
+      logoAlt: logo?.logoAlt ?? null,
+    });
+    await prisma.exam.update({
+      where: { id: examId },
+      data: {
+        googleFormId: form.formId,
+        googleFormUrl: form.responderUri,
+        googleFormEditUrl: form.editUrl,
+        googleFormCreatedAt: new Date(),
+        answerKeyReleasedAt: null,
+      },
+    });
+    revalidatePath(`/teacher/exams/${examId}`);
+    return { ok: true, url: form.responderUri };
+  } catch (e) {
+    console.error("Google Form generation failed:", e);
+    return {
+      error:
+        "Could not create the Google Form. Try reconnecting your Google account.",
+    };
+  }
+}
+
+// Push the answer key + points to the form so Google grades it. Run this after
+// the exam is over. Objective questions are auto-graded; open questions get
+// points only (the teacher grades them in Google Forms). Results stay with the
+// teacher, who owns the form.
+export async function releaseExamAnswerKey(
+  examId: string,
+): Promise<{ ok: true } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  if (!exam.googleFormId) return { error: "Generate the Google Form first." };
+  const account = await getGoogleAccount(teacher.id);
+  if (!account) return { error: "Connect your Google account first." };
+
+  const questions = await loadFormQuestions(examId);
+  try {
+    const accessToken = await getValidAccessToken(teacher.id);
+    await pushAnswerKey({
+      accessToken,
+      formId: exam.googleFormId,
+      questions,
+    });
+    await prisma.exam.update({
+      where: { id: examId },
+      data: { answerKeyReleasedAt: new Date() },
+    });
+    revalidatePath(`/teacher/exams/${examId}`);
+    return { ok: true };
+  } catch (e) {
+    console.error("Answer key release failed:", e);
+    return {
+      error:
+        "Could not release the answer key. Try reconnecting your Google account.",
+    };
+  }
+}
+
+// Load every student's answers to the exam's Google Form, shaped for display.
+export async function getExamResponses(
+  examId: string,
+): Promise<ExamResponsesResult> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  if (!exam.googleFormId) return { error: "Generate the Google Form first." };
+  const account = await getGoogleAccount(teacher.id);
+  if (!account) return { error: "Connect your Google account first." };
+
+  // Reading responses needs a scope that didn't exist when older accounts were
+  // connected. Detect the stale grant and prompt a reconnect rather than failing
+  // with an opaque Google error.
+  if (!account.scope?.includes("forms.responses")) {
+    return {
+      error: "Reconnect your Google account to allow reading form responses.",
+      needsReconnect: true,
+    };
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(teacher.id);
+    const form = await listFormResponses({
+      accessToken,
+      formId: exam.googleFormId,
+    });
+
+    // Attach each question's max points + keyword rubric from our DB, matched by
+    // position (the form's item order mirrors the exam's question order).
+    const examQuestions = await prisma.examQuestion.findMany({
+      where: { examId },
+      orderBy: { order: "asc" },
+      include: { question: true },
+    });
+    const questions: ExamResponseQuestion[] = form.questions.map((fq) => {
+      const eq = examQuestions[fq.index];
+      return {
+        index: fq.index,
+        title: fq.title,
+        maxPoints: eq ? (eq.points ?? eq.question.points) : (fq.points ?? 0),
+        keywords: parseDbKeywords(eq?.question.keywords),
+      };
+    });
+    return { ok: true, questions, responses: form.responses };
+  } catch (e) {
+    console.error("Loading form responses failed:", e);
+    return {
+      error: "Could not load responses. Try reconnecting your Google account.",
+      needsReconnect: true,
+    };
+  }
+}
+
+// Turn respondent-email collection on or off for the exam's Google Form. When
+// off, responses are anonymous.
+export async function setExamEmailCollection(
+  examId: string,
+  enabled: boolean,
+): Promise<{ ok: true } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  if (!exam.googleFormId) return { error: "Generate the Google Form first." };
+  const account = await getGoogleAccount(teacher.id);
+  if (!account) return { error: "Connect your Google account first." };
+
+  try {
+    const accessToken = await getValidAccessToken(teacher.id);
+    await setEmailCollection({ accessToken, formId: exam.googleFormId, enabled });
+    revalidatePath(`/teacher/exams/${examId}`);
+    return { ok: true };
+  } catch (e) {
+    console.error("Updating email collection failed:", e);
+    return {
+      error: "Could not update the email setting. Try reconnecting your Google account.",
+    };
+  }
 }
 
 export async function deleteExam(examId: string) {
   const teacher = await requireRole("TEACHER");
   const exam = await ownedExam(examId, teacher.id);
   if (!exam) return { error: "Exam not found." };
-  await prisma.exam.delete({ where: { id: examId } }); // cascades to questions/submissions
+  await prisma.exam.delete({ where: { id: examId } }); // cascades to exam questions
   revalidatePath("/teacher/exams");
   redirect("/teacher/exams");
 }

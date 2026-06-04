@@ -16,15 +16,13 @@ export default async function SchoolUsersPage() {
   }
 
   const users = await prisma.user.findMany({
-    where: { schoolId: admin.schoolId, role: { in: ["TEACHER", "STUDENT"] } },
+    where: { schoolId: admin.schoolId, role: "TEACHER" },
     orderBy: [{ accessStatus: "asc" }, { createdAt: "desc" }],
     select: {
       id: true,
       name: true,
       email: true,
-      role: true,
       accessStatus: true,
-      gradeLevel: true,
       createdAt: true,
     },
   });
@@ -33,9 +31,7 @@ export default async function SchoolUsersPage() {
     id: u.id,
     name: u.name,
     email: u.email,
-    role: u.role as "TEACHER" | "STUDENT",
     accessStatus: u.accessStatus,
-    gradeLevel: u.gradeLevel,
     createdAt: u.createdAt.toISOString(),
   }));
 
@@ -43,7 +39,7 @@ export default async function SchoolUsersPage() {
     <>
       <PageHeader
         title="School users"
-        description="Approve access and manage the teachers and students in your school."
+        description="Approve access and manage the teachers in your school."
       />
       <SchoolUsersTable users={rows} />
     </>

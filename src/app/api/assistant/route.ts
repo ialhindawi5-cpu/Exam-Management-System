@@ -19,24 +19,22 @@ You are chatting with ${name}, whose role is ${role}.
 Reply in the same language the user writes in (Arabic, French, or English). If their language is unclear, use ${langName(language)}.
 Help them use the app and with their exam-related tasks. Be concise, friendly, and practical.
 The system supports: a question bank (MCQ, true/false, short answer, essay, with images and Arabic/French/English),
-AI question generation, exams (manual build or auto-fill by difficulty), auto-grading of objective questions,
-AI-assisted grading of open answers, editable marks, releasing results to students, per-school branding,
-and Excel/Word report exports. Grading defaults to a score out of 20.`;
+AI question generation, exams (manual build or auto-fill by difficulty), and generating a Google Form from an exam
+that students take online (the teacher releases the answer key afterwards to auto-grade objective questions).
+Per-school branding is supported. Grading defaults to a score out of 20.`;
 
   const byRole: Record<Role, string> = {
     ADMIN:
       "As an admin they manage schools, approve users, assign roles, view orders/messages, and set branding. Guide them to the right admin page.",
     TEACHER:
-      "As a teacher they build a question bank, create and publish exams, grade submissions, and export reports. " +
+      "As a teacher they build a question bank, create and publish exams, and generate a Google Form for students to take. " +
       "When they ask you to create/generate questions AND save them, use the add_questions_to_bank tool. " +
       "When they ask you to build/create an exam or quiz, use the create_exam tool (it creates a draft and adds the questions). " +
       "For MCQ provide 4 options and set correctAnswer to the 0-based index (as a string). " +
       "For true/false set correctAnswer to 'true' or 'false'. For short answer/essay include a modelAnswer. " +
       "After acting, briefly confirm what you did. If you created an exam, share the link you were given so they can open it.",
-    STUDENT:
-      "As a student they take published exams and view released results.",
     SCHOOL_ADMIN:
-      "As a school admin they manage their own school's branding (logo and theme) and the users (teachers and students) that belong to their school. Guide them to their school pages.",
+      "As a school admin they manage their own school's branding (logo and theme) and the teachers that belong to their school. Guide them to their school pages.",
   };
 
   return `${common}\n${byRole[role]}\nIf a request is outside the app, still help where reasonable. Keep replies short unless asked for detail.`;
@@ -232,10 +230,6 @@ export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user || user.accessStatus !== "APPROVED") {
     return new Response("Unauthorized", { status: 401 });
-  }
-  // The AI assistant is for admins and teachers only.
-  if (user.role === "STUDENT") {
-    return new Response("Forbidden", { status: 403 });
   }
   if (!aiEnabled()) {
     return new Response(

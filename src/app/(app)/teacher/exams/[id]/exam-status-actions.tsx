@@ -38,6 +38,11 @@ export function ExamStatusActions({
           Close
         </Button>
       )}
+      {status === "PUBLISHED" && (
+        <Button variant="secondary" disabled={pending} onClick={() => change("DRAFT")}>
+          Unpublish
+        </Button>
+      )}
       {status === "CLOSED" && (
         <Button variant="secondary" disabled={pending} onClick={() => change("PUBLISHED")}>
           Reopen

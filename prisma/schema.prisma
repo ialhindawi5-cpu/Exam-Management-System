@@ -1,7 +1,7 @@
 // Exam Management System — data model
-// Roles + access gating (admin dashboard), question bank, exams,
-// submissions and per-answer auto/manual scoring. Grading scale defaults
-// to /20 (Lebanese MEHE standard) and is configurable per exam.
+// Roles + access gating (admin dashboard), question bank, and exam building.
+// Grading scale defaults to /20 (Lebanese MEHE standard) and is configurable
+// per exam.
 
 generator client {
   provider = "prisma-client-js"
@@ -20,7 +20,6 @@ enum Role {
   ADMIN
   SCHOOL_ADMIN // restricted admin scoped to a single school (manages its branding + users)
   TEACHER
-  STUDENT
 }
 
 // Admin grants access: new users are PENDING until approved.
@@ -32,9 +31,11 @@ enum AccessStatus {
 
 enum QuestionType {
   MCQ
+  CHECKBOX // multiple correct answers ("select all that apply")
+  DROPDOWN // single answer shown as a dropdown
   TRUE_FALSE
   SHORT_ANSWER
-  ESSAY
+  ESSAY // long / paragraph answer
 }
 
 enum Difficulty {
@@ -49,12 +50,6 @@ enum ExamStatus {
   CLOSED
 }
 
-enum SubmissionStatus {
-  IN_PROGRESS
-  SUBMITTED
-  GRADED
-}
-
 model User {
   id           String       @id @default(cuid())
   name         String
@@ -63,16 +58,32 @@ model User {
   role         Role         @default(TEACHER)
   accessStatus AccessStatus @default(PENDING)
   language     String       @default("en") // en | fr | ar
-  gradeLevel   String? // student's grade/class, e.g. "Grade 9" (MEHE)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
   schoolId String?
   school   School? @relation(fields: [schoolId], references: [id])
 
-  questions   Question[]   @relation("AuthoredQuestions")
-  exams       Exam[]       @relation("CreatedExams")
-  submissions Submission[]
+  questions Question[] @relation("AuthoredQuestions")
+  exams     Exam[]     @relation("CreatedExams")
+
+  // Connected Google account (per-teacher OAuth) used to generate Google Forms.
+  googleAccount GoogleAccount?
+}
+
+// Per-user Google OAuth credentials. A teacher connects their own Google account
+// once; their exams' Google Forms are then created in (and owned by) that account.
+model GoogleAccount {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  googleEmail  String? // the connected Google account's email (for display)
+  accessToken  String // current OAuth access token (short-lived)
+  refreshToken String // long-lived refresh token used to mint new access tokens
+  expiresAt    DateTime // when accessToken expires
+  scope        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 // Single-row app branding (used as a fallback when a user/exam has no school).
@@ -147,6 +158,7 @@ model Question {
   options       Json? // MCQ: ["A", "B", ...]; null otherwise
   correctAnswer String? // MCQ: option value; TRUE_FALSE: "true"/"false"
   modelAnswer   String? // reference answer / rubric for AI grading of open questions
+  keywords      Json? // open questions: keyword rubric [{ "text": string, "points": number }] used to grade essays in-app
   points        Float        @default(1)
   required      Boolean      @default(false) // student must answer before submitting
   language      String       @default("en")
@@ -161,7 +173,6 @@ model Question {
   updatedAt DateTime @updatedAt
 
   examQuestions ExamQuestion[]
-  answers       Answer[]
 
   @@index([subjectId, difficulty, type])
 }
@@ -175,7 +186,13 @@ model Exam {
   difficultyConfig Json? // auto-generation mix, e.g. {"easy":40,"medium":40,"hard":20}
   durationMins     Int?
   language         String     @default("en")
-  revealAnswers    Boolean    @default(false) // show correct answers to students after grading
+
+  // Google Form generated from this exam (created in the teacher's Google account).
+  googleFormId        String? // Forms API form id
+  googleFormUrl       String? // responder URL — the link students open to take the exam
+  googleFormEditUrl   String? // editor URL — the teacher's link to edit the form
+  googleFormCreatedAt DateTime?
+  answerKeyReleasedAt DateTime? // when correct answers/points were pushed for grading
 
   subjectId String?
   subject   Subject? @relation(fields: [subjectId], references: [id])
@@ -190,7 +207,6 @@ model Exam {
   updatedAt DateTime @updatedAt
 
   examQuestions ExamQuestion[]
-  submissions   Submission[]
 }
 
 // Join table: questions placed in an exam, with ordering and optional point override.
@@ -205,40 +221,7 @@ model ExamQuestion {
 
   @@unique([examId, questionId])
 }
+$env:DATABASE_URL = "PASTE_DATABASE_URL_HERE"
+$env:DIRECT_URL = "PASTE_DIRECT_URL_HERE"
+npx prisma db push
 
-model Submission {
-  id          String           @id @default(cuid())
-  examId      String
-  exam        Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
-  studentId   String
-  student     User             @relation(fields: [studentId], references: [id])
-  status      SubmissionStatus @default(IN_PROGRESS)
-  startedAt   DateTime         @default(now())
-  submittedAt DateTime?
-  gradedAt    DateTime?
-
-  totalAutoScore  Float? // sum of per-answer autoScore (raw points)
-  totalFinalScore Float? // sum of per-answer finalScore (raw points, after teacher edits)
-  scaledScore     Float? // totalFinalScore scaled to exam.totalMarks (e.g. /20)
-  overrideScore   Float? // teacher-set final mark; overrides scaledScore when present
-  released        Boolean @default(false) // results visible to the student
-
-  answers Answer[]
-
-  @@unique([examId, studentId])
-}
-
-model Answer {
-  id           String     @id @default(cuid())
-  submissionId String
-  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  questionId   String
-  question     Question   @relation(fields: [questionId], references: [id])
-  response     String? // student's answer
-  autoScore    Float? // system-suggested score (raw points)
-  finalScore   Float? // teacher-editable; defaults to autoScore
-  feedback     String?
-  aiGraded     Boolean    @default(false)
-
-  @@unique([submissionId, questionId])
-}

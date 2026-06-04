@@ -13,7 +13,7 @@ import {
   Badge,
 } from "@/components/ui";
 import {
-  QUESTION_TYPES,
+  AI_QUESTION_TYPES,
   DIFFICULTIES,
   QUESTION_TYPE_LABELS,
   DIFFICULTY_LABELS,
@@ -130,7 +130,7 @@ export function GeneratePanel({
             <div>
               <Label htmlFor="type">Type</Label>
               <Select id="type" name="type" defaultValue="MCQ">
-                {QUESTION_TYPES.map((t) => (
+                {AI_QUESTION_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {QUESTION_TYPE_LABELS[t]}
                   </option>

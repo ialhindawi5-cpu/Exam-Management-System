@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/dal";
-import type { QuestionType, Difficulty } from "@prisma/client";
+import type { QuestionType, Difficulty, Prisma } from "@prisma/client";
 
 export type QuestionFormState = { error?: string } | undefined;
+
+export type Keyword = { text: string; points: number };
 
 type ParsedQuestion = {
   type: QuestionType;
@@ -20,7 +22,29 @@ type ParsedQuestion = {
   options: string[] | null;
   correctAnswer: string | null;
   modelAnswer: string | null;
+  keywords: Keyword[]; // open questions only; [] otherwise
 };
+
+// Parse the question form's keyword rubric (a JSON array submitted as a hidden
+// field). Drops blank keywords and clamps points to non-negative numbers.
+function parseKeywords(raw: FormDataEntryValue | null): Keyword[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  let arr: unknown;
+  try {
+    arr = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((k) => {
+      const obj = (k ?? {}) as { text?: unknown; points?: unknown };
+      const text = String(obj.text ?? "").trim();
+      const points = Number(obj.points);
+      return { text, points: Number.isFinite(points) && points >= 0 ? points : 0 };
+    })
+    .filter((k) => k.text.length > 0);
+}
 
 // Parse + validate the dynamic question form. Returns either fields or an error.
 function parse(formData: FormData): { data: ParsedQuestion } | { error: string } {
@@ -32,7 +56,11 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
   const text = String(formData.get("text") ?? "").trim();
   const points = Number(formData.get("points") ?? 1);
 
-  if (!["MCQ", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY"].includes(type)) {
+  if (
+    !["MCQ", "CHECKBOX", "DROPDOWN", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY"].includes(
+      type,
+    )
+  ) {
     return { error: "Invalid question type." };
   }
   if (!text) return { error: "Question text is required." };
@@ -53,20 +81,36 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
   let options: string[] | null = null;
   let correctAnswer: string | null = null;
   let modelAnswer: string | null = null;
+  let keywords: Keyword[] = [];
 
-  if (type === "MCQ") {
+  if (type === "MCQ" || type === "CHECKBOX" || type === "DROPDOWN") {
     options = formData
       .getAll("option")
       .map((o) => String(o).trim())
       .filter(Boolean);
     if (options.length < 2) {
-      return { error: "Add at least two options for a multiple-choice question." };
+      return { error: "Add at least two options for this question." };
     }
-    const idx = Number(formData.get("correctAnswer"));
-    if (!Number.isInteger(idx) || idx < 0 || idx >= options.length) {
-      return { error: "Select which option is the correct answer." };
+    if (type === "CHECKBOX") {
+      // correctAnswer stores the comma-separated indices of every correct option.
+      const opts = options; // non-null binding for use inside the closure
+      const indices = String(formData.get("correctAnswer") ?? "")
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < opts.length);
+      const unique = Array.from(new Set(indices)).sort((a, b) => a - b);
+      if (unique.length === 0) {
+        return { error: "Select at least one correct option." };
+      }
+      correctAnswer = unique.join(",");
+    } else {
+      // MCQ / DROPDOWN — a single correct option, stored as its index.
+      const idx = Number(formData.get("correctAnswer"));
+      if (!Number.isInteger(idx) || idx < 0 || idx >= options.length) {
+        return { error: "Select which option is the correct answer." };
+      }
+      correctAnswer = String(idx);
     }
-    correctAnswer = String(idx); // store index into options
   } else if (type === "TRUE_FALSE") {
     const v = String(formData.get("correctAnswer") ?? "");
     if (v !== "true" && v !== "false") {
@@ -74,8 +118,10 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
     }
     correctAnswer = v;
   } else {
-    // SHORT_ANSWER / ESSAY — model answer optional but recommended for AI grading.
+    // SHORT_ANSWER / ESSAY — model answer optional but recommended for AI grading;
+    // optional keyword rubric used to grade the answer in-app.
     modelAnswer = String(formData.get("modelAnswer") ?? "").trim() || null;
+    keywords = parseKeywords(formData.get("keywords"));
   }
 
   return {
@@ -91,6 +137,7 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
       options,
       correctAnswer,
       modelAnswer,
+      keywords,
     },
   };
 }
@@ -126,6 +173,7 @@ export async function saveQuestion(
         options: d.options ?? undefined,
         correctAnswer: d.correctAnswer,
         modelAnswer: d.modelAnswer,
+        keywords: d.keywords as Prisma.InputJsonValue,
       },
     });
   } else {
@@ -142,6 +190,7 @@ export async function saveQuestion(
         options: d.options ?? undefined,
         correctAnswer: d.correctAnswer,
         modelAnswer: d.modelAnswer,
+        keywords: d.keywords as Prisma.InputJsonValue,
         createdById: teacher.id,
       },
     });

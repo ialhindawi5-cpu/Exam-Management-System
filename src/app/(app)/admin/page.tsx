@@ -21,7 +21,6 @@ export default async function AdminOverview() {
   const roleCount = (r: Role) =>
     usersByRole.find((g) => g.role === r)?._count._all ?? 0;
   const teachers = roleCount("TEACHER");
-  const students = roleCount("STUDENT");
   const totalUsers = usersByRole.reduce((sum, g) => sum + g._count._all, 0);
 
   const paidOrders = orders.filter((o) => o.status === "PAID");
@@ -39,7 +38,7 @@ export default async function AdminOverview() {
       label: "Users",
       value: totalUsers,
       href: "/admin/users",
-      hint: `${teachers} teachers · ${students} students`,
+      hint: `${teachers} teachers`,
     },
     {
       label: "Paid revenue",

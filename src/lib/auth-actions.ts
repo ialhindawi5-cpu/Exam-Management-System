@@ -13,8 +13,6 @@ const RegisterSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters."),
   email: z.string().trim().toLowerCase().pipe(z.email("Enter a valid email.")),
   password: z.string().min(8, "Password must be at least 8 characters."),
-  role: z.enum(["TEACHER", "STUDENT"]),
-  gradeLevel: z.string().trim().optional(),
   schoolId: z.string().trim().min(1, "Please select your school."),
 });
 
@@ -26,8 +24,6 @@ export async function register(
     name: formData.get("name"),
     email: formData.get("email"),
     password: formData.get("password"),
-    role: formData.get("role"),
-    gradeLevel: formData.get("gradeLevel") ?? undefined,
     schoolId: formData.get("schoolId") ?? undefined,
   });
 
@@ -35,7 +31,7 @@ export async function register(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  const { name, email, password, role, gradeLevel, schoolId } = parsed.data;
+  const { name, email, password, schoolId } = parsed.data;
 
   // Ensure the chosen school exists.
   const school = await prisma.school.findUnique({ where: { id: schoolId } });
@@ -47,15 +43,14 @@ export async function register(
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
+  // Self-registration is always for teachers; admins/school admins are assigned.
   await prisma.user.create({
     data: {
       name,
       email,
       passwordHash,
-      role,
+      role: "TEACHER",
       accessStatus: "PENDING",
-      // Grade only applies to students.
-      gradeLevel: role === "STUDENT" ? gradeLevel || null : null,
       schoolId: schoolId || null,
     },
   });

@@ -22,7 +22,24 @@ export default async function EditQuestionPage({
 
   const options = Array.isArray(q.options) ? (q.options as string[]) : [];
   const correctIndex =
-    q.type === "MCQ" && q.correctAnswer ? Number(q.correctAnswer) : 0;
+    (q.type === "MCQ" || q.type === "DROPDOWN") && q.correctAnswer
+      ? Number(q.correctAnswer)
+      : 0;
+  const correctIndices =
+    q.type === "CHECKBOX" && q.correctAnswer
+      ? q.correctAnswer
+          .split(",")
+          .map((s) => Number(s.trim()))
+          .filter((n) => Number.isInteger(n))
+      : [];
+  const keywords = Array.isArray(q.keywords)
+    ? (q.keywords as unknown[])
+        .map((k) => {
+          const obj = (k ?? {}) as { text?: unknown; points?: unknown };
+          return { text: String(obj.text ?? ""), points: Number(obj.points) || 0 };
+        })
+        .filter((k) => k.text.trim().length > 0)
+    : [];
 
   return (
     <>
@@ -41,8 +58,10 @@ export default async function EditQuestionPage({
           required: q.required,
           options,
           correctIndex,
+          correctIndices,
           tfAnswer: q.correctAnswer === "false" ? "false" : "true",
           modelAnswer: q.modelAnswer ?? "",
+          keywords,
         }}
       />
     </>

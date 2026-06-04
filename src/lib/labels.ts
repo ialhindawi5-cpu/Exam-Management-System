@@ -2,18 +2,27 @@ import type { QuestionType, Difficulty } from "@prisma/client";
 
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   MCQ: "Multiple Choice",
+  CHECKBOX: "Checkboxes",
+  DROPDOWN: "Dropdown",
   TRUE_FALSE: "True / False",
   SHORT_ANSWER: "Short Answer",
-  ESSAY: "Essay",
+  ESSAY: "Long Answer",
 };
 
 // Whether a question type can be graded automatically with certainty.
 export const IS_AUTO_GRADABLE: Record<QuestionType, boolean> = {
   MCQ: true,
+  CHECKBOX: true,
+  DROPDOWN: true,
   TRUE_FALSE: true,
   SHORT_ANSWER: false, // AI-assisted suggestion only
   ESSAY: false, // AI-assisted suggestion only
 };
+
+// Choice-based types whose answer is one or more of a fixed list of options.
+export const CHOICE_TYPES: QuestionType[] = ["MCQ", "CHECKBOX", "DROPDOWN"];
+// Choice types that allow more than one correct answer.
+export const MULTI_ANSWER_TYPES: QuestionType[] = ["CHECKBOX"];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   EASY: "Easy",
@@ -22,7 +31,20 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
 };
 
 export const DIFFICULTIES: Difficulty[] = ["EASY", "MEDIUM", "HARD"];
+
+// All question types, in the order shown in the question-form dropdown.
 export const QUESTION_TYPES: QuestionType[] = [
+  "MCQ",
+  "CHECKBOX",
+  "DROPDOWN",
+  "TRUE_FALSE",
+  "SHORT_ANSWER",
+  "ESSAY",
+];
+
+// Types the AI generator can produce. Checkboxes/dropdown are created manually
+// (the generator's prompt + parsing only cover these four).
+export const AI_QUESTION_TYPES: QuestionType[] = [
   "MCQ",
   "TRUE_FALSE",
   "SHORT_ANSWER",

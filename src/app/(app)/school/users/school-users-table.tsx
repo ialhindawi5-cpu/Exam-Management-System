@@ -3,19 +3,16 @@
 import { useState, useTransition } from "react";
 import {
   setMySchoolUserAccess,
-  setMySchoolUserRole,
   setMySchoolUserPassword,
 } from "@/lib/school-admin-actions";
-import { Badge, Button, Select, EmptyState, cn } from "@/components/ui";
+import { Badge, Button, EmptyState, cn } from "@/components/ui";
 import type { AccessStatus } from "@prisma/client";
 
 export type SchoolUserRow = {
   id: string;
   name: string;
   email: string;
-  role: "TEACHER" | "STUDENT";
   accessStatus: AccessStatus;
-  gradeLevel: string | null;
   createdAt: string;
 };
 
@@ -37,9 +34,45 @@ export function SchoolUsersTable({ users }: { users: SchoolUserRow[] }) {
     });
   }
 
-  if (users.length === 0) {
-    return <EmptyState>No teachers or students in your school yet.</EmptyState>;
+  function resetPw(u: SchoolUserRow) {
+    const pw = prompt(`Set a new password for ${u.name} (min 8 characters):`);
+    if (pw == null) return;
+    run(async () => {
+      const res = await setMySchoolUserPassword(u.id, pw);
+      if (!(res && "error" in res && res.error)) alert("Password updated.");
+      return res;
+    });
   }
+
+  if (users.length === 0) {
+    return <EmptyState>No teachers in your school yet.</EmptyState>;
+  }
+
+  const actions = (u: SchoolUserRow) => (
+    <>
+      {u.accessStatus !== "APPROVED" && (
+        <Button
+          variant="success"
+          disabled={pending}
+          onClick={() => run(() => setMySchoolUserAccess(u.id, "APPROVED"))}
+        >
+          Approve
+        </Button>
+      )}
+      {u.accessStatus !== "SUSPENDED" && (
+        <Button
+          variant="secondary"
+          disabled={pending}
+          onClick={() => run(() => setMySchoolUserAccess(u.id, "SUSPENDED"))}
+        >
+          Suspend
+        </Button>
+      )}
+      <Button variant="ghost" disabled={pending} onClick={() => resetPw(u)}>
+        Reset PW
+      </Button>
+    </>
+  );
 
   return (
     <div>
@@ -48,12 +81,13 @@ export function SchoolUsersTable({ users }: { users: SchoolUserRow[] }) {
           {error}
         </p>
       )}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+
+      {/* Desktop / tablet: table */}
+      <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white md:block">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
               <th className="px-4 py-3">User</th>
-              <th className="px-4 py-3">Role</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -64,75 +98,40 @@ export function SchoolUsersTable({ users }: { users: SchoolUserRow[] }) {
                 <td className="px-4 py-3">
                   <div className="font-medium text-gray-900">{u.name}</div>
                   <div className="text-xs text-gray-500">{u.email}</div>
-                  {u.role === "STUDENT" && u.gradeLevel && (
-                    <div className="text-xs text-gray-400">{u.gradeLevel}</div>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <Select
-                    className="w-32"
-                    value={u.role}
-                    disabled={pending}
-                    onChange={(e) =>
-                      run(() =>
-                        setMySchoolUserRole(
-                          u.id,
-                          e.target.value as "TEACHER" | "STUDENT",
-                        ),
-                      )
-                    }
-                  >
-                    <option value="TEACHER">Teacher</option>
-                    <option value="STUDENT">Student</option>
-                  </Select>
                 </td>
                 <td className="px-4 py-3">
                   <Badge color={statusColor[u.accessStatus]}>{u.accessStatus}</Badge>
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex justify-end gap-2">
-                    {u.accessStatus !== "APPROVED" && (
-                      <Button
-                        variant="success"
-                        disabled={pending}
-                        onClick={() => run(() => setMySchoolUserAccess(u.id, "APPROVED"))}
-                      >
-                        Approve
-                      </Button>
-                    )}
-                    {u.accessStatus !== "SUSPENDED" && (
-                      <Button
-                        variant="secondary"
-                        disabled={pending}
-                        onClick={() => run(() => setMySchoolUserAccess(u.id, "SUSPENDED"))}
-                      >
-                        Suspend
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      disabled={pending}
-                      onClick={() => {
-                        const pw = prompt(
-                          `Set a new password for ${u.name} (min 8 characters):`,
-                        );
-                        if (pw == null) return;
-                        run(async () => {
-                          const res = await setMySchoolUserPassword(u.id, pw);
-                          if (!(res && "error" in res && res.error))
-                            alert("Password updated.");
-                          return res;
-                        });
-                      }}
-                    >
-                      Reset PW
-                    </Button>
-                  </div>
+                  <div className="flex justify-end gap-2">{actions(u)}</div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile: stacked cards */}
+      <div className="space-y-3 md:hidden">
+        {users.map((u) => (
+          <div
+            key={u.id}
+            className={cn(
+              "rounded-xl border border-gray-200 bg-white p-4",
+              pending && "opacity-60",
+            )}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-medium text-gray-900">{u.name}</div>
+                <div className="truncate text-xs text-gray-500">{u.email}</div>
+              </div>
+              <Badge color={statusColor[u.accessStatus]}>{u.accessStatus}</Badge>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">{actions(u)}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

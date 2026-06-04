@@ -2,9 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/dal";
-import { Card, CardBody, Button, Badge } from "@/components/ui";
+import {
+  googleConfigured,
+  getGoogleAccount,
+  getValidAccessToken,
+} from "@/lib/google";
+import { getEmailCollection } from "@/lib/google-forms";
+import { Card, CardBody, Badge, Button } from "@/components/ui";
 import { ExamStatusActions } from "./exam-status-actions";
 import { ExamMetaForm } from "./exam-meta-form";
+import { GoogleFormPanel } from "./google-form-panel";
+import { ResponsesPanel } from "./responses-panel";
 import {
   ExamQuestionsManager,
   type QuestionLite,
@@ -19,11 +27,16 @@ const statusColor: Record<ExamStatus, "yellow" | "green" | "gray"> = {
 
 export default async function ExamBuilderPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ google?: string }>;
 }) {
   const teacher = await requireRole("TEACHER");
   const { id } = await params;
+  const { google } = await searchParams;
+  const notice =
+    google === "connected" ? "connected" : google === "error" ? "error" : null;
 
   const exam = await prisma.exam.findUnique({
     where: { id },
@@ -32,20 +45,29 @@ export default async function ExamBuilderPage({
         orderBy: { order: "asc" },
         include: { question: { include: { subject: { select: { name: true } } } } },
       },
-      _count: { select: { submissions: true } },
     },
   });
   if (!exam || exam.createdById !== teacher.id) notFound();
 
   const currentIds = exam.examQuestions.map((eq) => eq.questionId);
 
-  const [subjects, bank] = await Promise.all([
+  const [subjects, bank, googleAccount, collectEmails] = await Promise.all([
     prisma.subject.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.question.findMany({
       where: { createdById: teacher.id, id: { notIn: currentIds } },
       orderBy: { createdAt: "desc" },
       include: { subject: { select: { name: true } } },
     }),
+    getGoogleAccount(teacher.id),
+    // Read the form's current email-collection setting (best-effort) so the
+    // panel's toggle reflects reality. Only meaningful once a form exists.
+    exam.googleFormId
+      ? getValidAccessToken(teacher.id)
+          .then((token) =>
+            getEmailCollection({ accessToken: token, formId: exam.googleFormId! }),
+          )
+          .catch(() => null)
+      : Promise.resolve<boolean | null>(null),
   ]);
 
   const current: QuestionLite[] = exam.examQuestions.map((eq) => ({
@@ -78,23 +100,15 @@ export default async function ExamBuilderPage({
           </div>
           <p className="mt-1 text-sm text-gray-500">
             Graded out of {exam.totalMarks}
-            {exam.durationMins ? ` · ${exam.durationMins} min` : ""} ·{" "}
-            {exam._count.submissions} submissions
+            {exam.durationMins ? ` · ${exam.durationMins} min` : ""}
           </p>
         </div>
-        <ExamStatusActions examId={exam.id} status={exam.status} />
-      </div>
-
-      <div className="mb-6 flex flex-wrap gap-2">
-        <Link href={`/teacher/exams/${exam.id}/submissions`}>
-          <Button variant="secondary">View submissions ({exam._count.submissions})</Button>
-        </Link>
-        <Link href={`/teacher/exams/${exam.id}/report/excel`} prefetch={false}>
-          <Button variant="secondary">⬇ Excel report</Button>
-        </Link>
-        <Link href={`/teacher/exams/${exam.id}/report/word`} prefetch={false}>
-          <Button variant="secondary">⬇ Word report</Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/print/exams/${exam.id}`} target="_blank">
+            <Button variant="secondary">Print / export PDF</Button>
+          </Link>
+          <ExamStatusActions examId={exam.id} status={exam.status} />
+        </div>
       </div>
 
       <div className="mb-6">
@@ -107,11 +121,38 @@ export default async function ExamBuilderPage({
             language: exam.language,
             totalMarks: exam.totalMarks,
             durationMins: exam.durationMins,
-            revealAnswers: exam.revealAnswers,
           }}
           subjects={subjects}
         />
       </div>
+
+      <div className="mb-6">
+        <GoogleFormPanel
+          examId={exam.id}
+          examStatus={exam.status}
+          questionCount={exam.examQuestions.length}
+          googleConfigured={googleConfigured()}
+          connected={Boolean(googleAccount)}
+          googleEmail={googleAccount?.googleEmail ?? null}
+          form={
+            exam.googleFormId
+              ? {
+                  url: exam.googleFormUrl,
+                  editUrl: exam.googleFormEditUrl,
+                  answerKeyReleased: Boolean(exam.answerKeyReleasedAt),
+                  collectEmails,
+                }
+              : null
+          }
+          notice={notice}
+        />
+      </div>
+
+      {exam.googleFormId && (
+        <div className="mb-6">
+          <ResponsesPanel examId={exam.id} />
+        </div>
+      )}
 
       {exam.examQuestions.length === 0 && (
         <Card className="mb-4 border-blue-200 bg-blue-50">

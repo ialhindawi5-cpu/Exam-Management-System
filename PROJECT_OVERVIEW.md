@@ -1,0 +1,309 @@
+# Exam Management System — Project Overview
+
+> Living document describing the project from scratch: architecture, the
+> development phases we went through, what is **done**, what is **missing**, and
+> the **next steps**. Last updated: 2026-05-25.
+
+---
+
+## 1. What this project is
+
+A multi-school **Exam Management System** — a web app where:
+
+- A **master admin** manages schools, users, subjects, pricing/orders, and contact messages, and edits the public marketing site + branding.
+- **School admins** (restricted) manage only their own school: its logo, theme/design, and its own teachers & students.
+- **Teachers** build a question bank, generate exams (manually or with AI), grade, and export reports.
+- **Students** take exams online and see released results.
+- A **public marketing homepage** (hero, features, how-it-works, about, contact) drives sign-ups and a paid school license (`/cart`).
+
+The admin can also edit all marketing pages, swap the logo, read the contact
+form submissions, see who paid, and see how many schools/users exist — through an
+embedded CMS (PayloadCMS) at `/cms`.
+
+---
+
+## 2. Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | **Next.js 16.2.6** (App Router, Turbopack) |
+| Language | TypeScript / React (server components) |
+| ORM | **Prisma 6.16.2** (schema `public`) |
+| Database | **PostgreSQL** — local Docker for dev, **Neon** (serverless) for prod |
+| CMS | **PayloadCMS 3.84.1** embedded in the same Next app (schema `payload`) |
+| Payload DB adapter | `@payloadcms/db-postgres` (Drizzle) |
+| Auth | **Custom JWT** with `jose` (no NextAuth) |
+| Styling | **Tailwind CSS** (`bg-brand`/`text-brand` driven by a `--brand` CSS var per school) |
+| Hosting | **Vercel** (app) + **Neon** (database) |
+| AI assistant | Optional — needs a valid `ANTHROPIC_API_KEY` (currently off) |
+
+### Key architectural decisions
+
+- **One database, two schemas.** Prisma owns `public`; Payload owns `payload`
+  (`schemaName: "payload"`). This keeps the CMS tables fully isolated from the
+  app's data and avoids Drizzle ever trying to rename/drop Prisma tables.
+- **Payload is embedded, not separate.** It runs inside the same Next.js app but
+  on relocated routes: admin UI at **`/cms`**, REST/GraphQL at **`/cms-api`**
+  (set via Payload's `routes` config) so it never collides with the app.
+- **Multi-root layout.** There is **no** `src/app/layout.tsx`. Instead:
+  - `src/app/(app)/layout.tsx` renders `<html><body>` for the real app.
+  - `src/app/(payload)/layout.tsx` is Payload's own root.
+  This prevents the nested-`<html>` hydration error.
+- **Custom admin dashboard is preserved.** Payload did **not** replace the app's
+  own `/admin` dashboard — they coexist. (`/admin` = app dashboard, `/cms` = CMS.)
+- **Branding sync.** Editing the logo/site name in Payload's `Branding` global
+  fires an `afterChange` hook that upserts the Prisma `AppSetting` singleton, so
+  the app reads branding from one place (`getSettings()`).
+- **Lazy env reads.** Secrets (`AUTH_SECRET`, etc.) are read inside functions,
+  never at module load, so `next build` page-data collection can't crash.
+- **`force-dynamic`** on DB-dependent public pages (`/`, `/cart`) so the build
+  never needs a DB connection and live edits appear immediately.
+
+---
+
+## 3. Roles & access model
+
+| Role | Scope |
+| --- | --- |
+| `ADMIN` (master) | Everything: schools, all users, subjects, orders, messages, settings, CMS, assigns `SCHOOL_ADMIN`. Dashboard at `/admin`. |
+| `SCHOOL_ADMIN` | Only their own school: edit school logo/theme/design, manage only their school's teachers & students. Dashboard at `/school`. |
+| `TEACHER` | Question bank, exam building, grading, reports for their school. |
+| `STUDENT` | Take exams, view released results. |
+
+`SCHOOL_ADMIN` is a value in the Prisma `Role` enum. Scoped actions live in
+`src/lib/school-admin-actions.ts` and always verify the target user belongs to
+the caller's school and is a `TEACHER`/`STUDENT`.
+
+---
+
+## 4. Important file map
+
+```
+src/
+  payload.config.ts                 # Payload config: routes /cms + /cms-api, schemaName "payload"
+  payload/
+    collections/{Admins,Media,Pages}.ts
+    globals/{Homepage,Branding}.ts  # Branding.afterChange -> Prisma AppSetting upsert
+    components/LogoField.tsx         # custom file->dataURL field (useField)
+    components/CmsNavLinks.tsx       # "Back to app dashboard" + "Log out" sidebar links
+  app/
+    (app)/
+      layout.tsx                     # real root: <html><body>, fonts, globals.css
+      page.tsx                       # public marketing homepage (force-dynamic)
+      cart/page.tsx                  # checkout (force-dynamic)
+      admin/*                        # master admin dashboard (custom, preserved)
+      school/*                       # SCHOOL_ADMIN area (branding-form, users)
+    (payload)/
+      layout.tsx                     # Payload root
+      cms/[[...segments]]/{page,not-found}.tsx
+      cms/importMap.js               # auto-generated by next build / withPayload
+      cms-api/[...slug]/route.ts
+      cms-api/graphql/route.ts       # GRAPHQL_POST only
+      cms-api/graphql-playground/route.ts
+  components/
+    nav-links.tsx                    # responsive dashboard nav (hamburger on mobile)
+    app-shell.tsx                    # logged-in header/shell, per-school theme color
+    marketing/{marketing-nav,contact-form}.tsx
+  lib/
+    payload.ts                       # getPayloadClient / getHomepageContent / getPageBySlug
+    session.ts                       # JWT (lazy encodedKey()), SessionPayload.role
+    dal.ts                           # CurrentUser, dashboardPathFor (SCHOOL_ADMIN -> /school)
+    settings.ts                      # getSettings / getBrandingForSchool
+    school-admin-actions.ts          # SCHOOL_ADMIN scoped server actions
+prisma/schema.prisma                 # Role enum (+SCHOOL_ADMIN); url + directUrl
+```
+
+---
+
+## 5. Development phases (chronological)
+
+### Phase 1 — Base app (pre-existing)
+Next.js 16 + Prisma + custom JWT auth; admin/teacher/student dashboards, question
+bank, exam builder, grading, reports, marketing homepage, `/cart` license flow.
+
+### Phase 2 — PayloadCMS integration
+- Embedded Payload 3.84.1 in the same app.
+- Chose **shared DB with `schemaName: "payload"`** for isolation.
+- Relocated routes to `/cms` and `/cms-api`.
+- Built collections (`Admins`, `Media`, `Pages`) and globals (`Homepage`, `Branding`).
+- Solved nested-`<html>` hydration via multi-root `(app)`/`(payload)` layouts.
+- Worked around the broken Payload CLI (tsx `ERR_MODULE_NOT_FOUND`, `loadEnv`
+  crash on Next 16): seed/admin via runtime, `importMap.js` regenerated by build.
+
+### Phase 3 — Admin/branding features
+- **Kept** the custom `/admin` dashboard (explicit requirement); CMS coexists.
+- Homepage nav shows **Login** (not "Dashboard").
+- **Logo editing inside Payload** via custom `LogoField`, synced to `AppSetting`.
+- Editable homepage **feature cards / steps / hero / about / contact** in Payload
+  (with built-in defaults when the global row is empty).
+- Payload sidebar **Log out** + "Back to app dashboard" links.
+
+### Phase 4 — Restricted SCHOOL_ADMIN role
+- Added `SCHOOL_ADMIN` to the `Role` enum and routing (`/school`).
+- Scoped server actions; school-only branding form + user management.
+
+### Phase 5 — Deployment (live)
+- Chose **Vercel + Neon**.
+- Fixed `AUTH_SECRET is not set` at build (made session env lazy).
+- Fixed 5-separate-env-vars mistake (one combined var → split correctly).
+- Solved restricted-network git issues (OpenSSL TLS backend, fine-grained PAT).
+- Disabled Vercel Deployment Protection (was 401-ing the live URL).
+- **Result: site is live** — homepage, `/cms`, `/login` all render error-free.
+
+### Phase 6 — Mobile responsive fixes (most recent)
+- Rewrote `nav-links.tsx`: desktop inline (`lg:flex`), mobile hamburger
+  (`lg:hidden`) with a dropdown panel + click-away backdrop. (8 admin links were
+  overflowing on phones — the confirmed structural break.)
+- Hardened `app-shell.tsx` brand (`min-w-0`, logo `shrink-0`, name `truncate`).
+- Tuned homepage spacing/typography (`py-14 sm:py-20`, hero `text-3xl sm:text-5xl`).
+- Made `/cart` `force-dynamic` (build was failing prerender when Docker was off).
+- Committed + pushed as **af04e7d**; Vercel auto-redeploying.
+
+### Phase 7 — Pivot to Google Forms delivery (current)
+The in-app student experience was **removed** in favour of delivering exams as
+**Google Forms**:
+- Dropped the `STUDENT` role, `gradeLevel`, `revealAnswers`, and the
+  `Submission`/`Answer` models. Student dashboards, in-app exam-taking, manual
+  grading panels, and Word/Excel report routes were deleted. Registration is now
+  teacher-only; school/admin user management lists teachers only.
+- Added **per-teacher Google OAuth** (`GoogleAccount` model) — a teacher
+  connects their own Google account; forms are created in (and owned by) it.
+  Routes: `/api/google/connect` + `/api/google/callback`. Libs:
+  `src/lib/google.ts` (OAuth/token refresh) and `src/lib/google-forms.ts`
+  (Forms API).
+- New `Exam` fields: `googleFormId`, `googleFormUrl` (student link),
+  `googleFormEditUrl`, `googleFormCreatedAt`, `answerKeyReleasedAt`.
+- **Generation flow:** publishing an exam (or the "Create Google Form" button on
+  the exam page) builds a Google Forms **quiz** with the exam's questions and
+  **no answer key** — so students see no score while taking it. After the exam,
+  the teacher clicks **"Release answer key & grade"**: correct answers + point
+  values are pushed so Google auto-grades MCQ/true-false; open questions get
+  points only and are graded by hand in Forms. Because the teacher owns the
+  form, grades stay visible only to them (keep Forms' grade release on "Later,
+  after manual review").
+- Question mapping: MCQ/true-false → RADIO choice questions; short answer →
+  short text; essay → paragraph. True/False labels localize to en/fr/ar.
+  (Question images and fractional points are not carried into Forms — Forms quiz
+  points are whole numbers.)
+
+---
+
+## 6. What is DONE ✅
+
+- [x] Core exam app (question bank, exam builder, grading, reports, roles).
+- [x] PayloadCMS embedded at `/cms` with isolated `payload` schema.
+- [x] Editable homepage content + feature cards in the CMS.
+- [x] Logo / site-name editing in Payload, synced to app branding.
+- [x] Payload sidebar log-out + back-to-app links.
+- [x] Custom `/admin` dashboard preserved and coexisting with the CMS.
+- [x] Homepage nav shows **Login**.
+- [x] `SCHOOL_ADMIN` restricted role: own-school branding + own-school users.
+- [x] Deployed live on **Vercel + Neon** (homepage, `/cms`, `/login` verified).
+- [x] Mobile responsive nav + homepage spacing (commit af04e7d, deploying).
+
+---
+
+## 7. What is MISSING / pending ⏳
+
+- [ ] **Verify the mobile fixes on a real phone** using the **production** URL
+      (not the frozen `-sjsuh6m0e-` preview URL).
+- [ ] **Dashboard data tables on mobile** — Users / Orders / Messages / Schools
+      still rely on horizontal scroll (functional, not pretty). Optional
+      conversion to stacked-card layout is offered but **not yet done**.
+- [ ] **AI assistant is OFF** — the current key is OpenAI format (`sk-proj-…`);
+      it needs a valid `ANTHROPIC_API_KEY` (`sk-ant-…`).
+- [ ] **Custom/production domain** not yet set up on Vercel.
+
+### Security to-dos (carry-over)
+- [ ] **Change admin password** after first login (`admin@school.edu.lb` /
+      `ChangeMe123!` appeared in chat).
+- [ ] **Revoke the GitHub fine-grained token** now that the site is confirmed live.
+- [ ] Neon DB password appeared in chat/`.env`; rotate if concerned. `.env` is
+      gitignored and verified excluded from commits and the zip.
+
+---
+
+## 8. NEXT STEP to implement (after compact)
+
+**Immediate:** Confirm the **af04e7d** deploy succeeded on Vercel and the mobile
+nav/homepage look correct on a phone (production URL).
+
+**Then, the next build item — mobile-friendly dashboard data tables:**
+Convert the admin/school data tables (Users, Orders, Messages, Schools) from
+horizontal-scroll `<table>`s to a **responsive stacked-card layout** on small
+screens:
+
+1. Keep the existing `<table>` for `md:` and up.
+2. On mobile (`< md`), render each row as a card: label/value pairs stacked
+   vertically, primary identifier (name/email) as the card title, actions
+   (role dropdown, access toggle) as full-width controls.
+3. Target files (lists already isolated as components):
+   - `src/app/(app)/admin/users/users-table.tsx`
+   - `src/app/(app)/admin/orders/orders-list.tsx`
+   - `src/app/(app)/admin/messages/messages-list.tsx`
+   - `src/app/(app)/admin/schools/...` (schools table)
+   - `src/app/(app)/school/users/school-users-table.tsx`
+4. Build locally (`npm run build`), commit, push — Vercel auto-deploys.
+
+> This was offered and is **awaiting the user's go-ahead** (proceed now vs. send
+> screenshots of the specific problematic tables first).
+
+---
+
+## 9. How to update the live site
+
+It's a normal git-driven Vercel deploy:
+
+```powershell
+# from C:\Users\USER\exam-system
+npm run build            # optional local sanity check
+git add -A
+git commit -m "your change"
+git push                 # Vercel auto-builds & redeploys main
+```
+
+The site stays up during the build; the new version swaps in atomically when the
+build is green. Roll back instantly from the Vercel dashboard if needed.
+
+### Local dev
+```powershell
+# Docker Desktop must be running (local Postgres on :5432)
+npm run dev              # next dev --no-server-fast-refresh
+```
+
+---
+
+## 10. Environment variables (Vercel — 5 separate vars)
+
+| Var | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Neon **pooled** connection string (app/Prisma runtime) |
+| `DIRECT_URL` | Neon **direct** connection string (Prisma migrations) |
+| `DATABASE_URI` | Same DB for Payload (falls back to `DATABASE_URL`) |
+| `AUTH_SECRET` | JWT signing secret (read lazily) |
+| `PAYLOAD_SECRET` | Payload secret |
+| `ANTHROPIC_API_KEY` | *(optional)* enables the AI assistant — must be `sk-ant-…` |
+| `GOOGLE_CLIENT_ID` | *(optional)* OAuth client id — enables per-teacher Google Form generation |
+| `GOOGLE_CLIENT_SECRET` | *(optional)* OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | *(optional)* pin the OAuth callback; defaults to `<origin>/api/google/callback` |
+
+> Do **not** combine these into a single var. `.env` stays local + gitignored.
+> For Google: enable the **Google Forms API**, configure the OAuth consent
+> screen, create a **Web application** OAuth client, and register the redirect
+> URI `<app-url>/api/google/callback` (both localhost and production).
+
+---
+
+## 11. Known gotchas (Next 16 / Prisma / Payload on this machine)
+
+- The bundled **Payload CLI is broken** under Next 16 (tsx sub-import resolution,
+  `loadEnv` crash). Don't use it — rely on `next build`/`withPayload` to generate
+  `importMap.js`, and seed/admin via runtime.
+- GraphQL route exports **`GRAPHQL_POST`** and **`GRAPHQL_PLAYGROUND_GET`** only
+  (no `GRAPHQL_OPTIONS`).
+- Homepage **defaults only show when the Payload global row doesn't exist** — had
+  to `TRUNCATE payload.homepage CASCADE` locally to see them.
+- Don't `2>&1` native git/build in PowerShell — it wraps stderr as errors and
+  reports a false non-zero exit. Use `| Out-Null; $LASTEXITCODE`.
+- DB-dependent public pages must be `force-dynamic` or the build tries to reach
+  Postgres at prerender time (fails when Docker is closed).

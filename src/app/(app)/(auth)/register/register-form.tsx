@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { register, type AuthState } from "@/lib/auth-actions";
 import { Button, Card, CardBody, Input, Label, Select } from "@/components/ui";
-import { GRADE_LEVELS } from "@/lib/labels";
 
 export function RegisterForm({
   schools,
@@ -15,7 +14,6 @@ export function RegisterForm({
     register,
     undefined,
   );
-  const [role, setRole] = useState("TEACHER");
 
   return (
     <Card>
@@ -43,19 +41,6 @@ export function RegisterForm({
             />
           </div>
           <div>
-            <Label htmlFor="role">I am a</Label>
-            <Select
-              id="role"
-              name="role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-            >
-              <option value="TEACHER">Teacher</option>
-              <option value="STUDENT">Student</option>
-            </Select>
-          </div>
-
-          <div>
             <Label htmlFor="schoolId">School</Label>
             <Select id="schoolId" name="schoolId" defaultValue="" required>
               <option value="" disabled>
@@ -73,20 +58,6 @@ export function RegisterForm({
               </p>
             )}
           </div>
-
-          {role === "STUDENT" && (
-            <div>
-              <Label htmlFor="gradeLevel">Grade / class</Label>
-              <Select id="gradeLevel" name="gradeLevel" defaultValue="">
-                <option value="">— Select your grade —</option>
-                {GRADE_LEVELS.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
 
           {state?.error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

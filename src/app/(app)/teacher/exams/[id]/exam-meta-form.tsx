@@ -21,7 +21,6 @@ export type ExamMeta = {
   language: string;
   totalMarks: number;
   durationMins: number | null;
-  revealAnswers: boolean;
 };
 
 export function ExamMetaForm({
@@ -101,15 +100,6 @@ export function ExamMetaForm({
                 />
               </div>
             </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                name="revealAnswers"
-                defaultChecked={exam.revealAnswers}
-                className="h-4 w-4"
-              />
-              Show correct answers to students after grading
-            </label>
             {state?.error && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
                 {state.error}

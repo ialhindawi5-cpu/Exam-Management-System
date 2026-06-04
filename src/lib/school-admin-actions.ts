@@ -7,9 +7,9 @@ import { requireRole } from "@/lib/dal";
 import type { AccessStatus } from "@prisma/client";
 
 // Actions for a SCHOOL_ADMIN: a restricted admin scoped to a single school.
-// They may edit their own school's branding and manage (only) the teachers and
-// students that belong to their school. Every action re-checks the caller's
-// role and that the target belongs to their school.
+// They may edit their own school's branding and manage (only) the teachers that
+// belong to their school. Every action re-checks the caller's role and that the
+// target belongs to their school.
 
 export type SchoolAdminState = { error?: string; ok?: boolean } | undefined;
 
@@ -39,16 +39,14 @@ async function requireSchoolAdmin() {
 }
 
 // A target user is manageable only if it is in the admin's school and is a
-// teacher or student (a school admin can never touch admins / other schools).
+// teacher (a school admin can never touch admins / other schools).
 async function isManageable(adminSchoolId: string, userId: string) {
   const target = await prisma.user.findUnique({
     where: { id: userId },
     select: { schoolId: true, role: true },
   });
   return Boolean(
-    target &&
-      target.schoolId === adminSchoolId &&
-      (target.role === "TEACHER" || target.role === "STUDENT"),
+    target && target.schoolId === adminSchoolId && target.role === "TEACHER",
   );
 }
 
@@ -84,20 +82,6 @@ export async function setMySchoolUserAccess(userId: string, status: AccessStatus
     return { error: "You can only manage users in your own school." };
   }
   await prisma.user.update({ where: { id: userId }, data: { accessStatus: status } });
-  revalidatePath("/school/users");
-  return { ok: true };
-}
-
-export async function setMySchoolUserRole(
-  userId: string,
-  role: "TEACHER" | "STUDENT",
-) {
-  const admin = await requireSchoolAdmin();
-  if (role !== "TEACHER" && role !== "STUDENT") return { error: "Invalid role." };
-  if (!(await isManageable(admin.schoolId, userId))) {
-    return { error: "You can only manage users in your own school." };
-  }
-  await prisma.user.update({ where: { id: userId }, data: { role } });
   revalidatePath("/school/users");
   return { ok: true };
 }

@@ -17,7 +17,7 @@ export default async function ExamsPage() {
     orderBy: { updatedAt: "desc" },
     include: {
       subject: { select: { name: true } },
-      _count: { select: { examQuestions: true, submissions: true } },
+      _count: { select: { examQuestions: true } },
     },
   });
 
@@ -50,8 +50,7 @@ export default async function ExamsPage() {
                 </div>
                 <p className="mt-0.5 text-sm text-gray-500">
                   {e.subject?.name ? `${e.subject.name} · ` : ""}
-                  {e._count.examQuestions} questions · {e._count.submissions}{" "}
-                  submissions · /{e.totalMarks}
+                  {e._count.examQuestions} questions · /{e.totalMarks}
                 </p>
               </div>
               <span className="text-gray-400">→</span>

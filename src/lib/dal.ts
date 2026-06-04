@@ -12,7 +12,6 @@ export type CurrentUser = {
   role: Role;
   accessStatus: AccessStatus;
   language: string;
-  gradeLevel: string | null;
   schoolId: string | null;
 };
 
@@ -30,7 +29,6 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       role: true,
       accessStatus: true,
       language: true,
-      gradeLevel: true,
       schoolId: true,
     },
   });
@@ -64,7 +62,5 @@ export function dashboardPathFor(role: Role): string {
       return "/school";
     case "TEACHER":
       return "/teacher";
-    case "STUDENT":
-      return "/student";
   }
 }

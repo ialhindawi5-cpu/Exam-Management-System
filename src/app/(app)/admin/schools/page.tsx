@@ -14,7 +14,7 @@ export default async function AdminSchoolsPage() {
     prisma.user.groupBy({ by: ["schoolId", "role"], _count: { _all: true } }),
   ]);
 
-  const countFor = (schoolId: string, role: "TEACHER" | "STUDENT") =>
+  const countFor = (schoolId: string, role: "TEACHER") =>
     userGroups.find((g) => g.schoolId === schoolId && g.role === role)?._count
       ._all ?? 0;
 
@@ -24,7 +24,6 @@ export default async function AdminSchoolsPage() {
     logoDataUrl: s.logoDataUrl,
     themeColor: s.themeColor,
     teachers: countFor(s.id, "TEACHER"),
-    students: countFor(s.id, "STUDENT"),
     exams: s._count.exams,
   }));
 
@@ -32,7 +31,7 @@ export default async function AdminSchoolsPage() {
     <>
       <PageHeader
         title="Schools"
-        description="Each school keeps its own teachers, students, exams, and branding."
+        description="Each school keeps its own teachers, exams, and branding."
       />
       <SchoolsManager schools={rows} />
     </>

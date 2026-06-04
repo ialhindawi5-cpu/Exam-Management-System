@@ -26,8 +26,10 @@ export default async function NewQuestionPage() {
           required: false,
           options: ["", ""],
           correctIndex: 0,
+          correctIndices: [],
           tfAnswer: "true",
           modelAnswer: "",
+          keywords: [],
         }}
       />
     </>

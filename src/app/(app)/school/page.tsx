@@ -29,15 +29,13 @@ export default async function SchoolHome() {
     );
   }
 
-  const [teachers, students, exams] = await Promise.all([
+  const [teachers, exams] = await Promise.all([
     prisma.user.count({ where: { schoolId: school.id, role: "TEACHER" } }),
-    prisma.user.count({ where: { schoolId: school.id, role: "STUDENT" } }),
     prisma.exam.count({ where: { schoolId: school.id } }),
   ]);
 
   const stats = [
     { label: "Teachers", value: teachers },
-    { label: "Students", value: students },
     { label: "Exams", value: exams },
   ];
 
@@ -53,7 +51,7 @@ export default async function SchoolHome() {
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
         {stats.map((s) => (
           <Card key={s.label}>
             <CardBody>
