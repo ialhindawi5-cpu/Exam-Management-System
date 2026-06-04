@@ -56,7 +56,17 @@ async function formsFetch<T>(
 // The choice/text question body for an item (no grading at this stage).
 function questionBody(q: FormQuestionInput): Record<string, unknown> {
   if (q.type === "MCQ" || q.type === "CHECKBOX" || q.type === "DROPDOWN") {
-    const options = (q.options ?? []).map((value) => ({ value }));
+    // Google rejects choice questions with blank or duplicate option values, so
+    // drop empties and keep the first occurrence of each value. Grading matches
+    // by answer text (see correctChoiceValues), so this never affects scoring.
+    const seen = new Set<string>();
+    const options: { value: string }[] = [];
+    for (const raw of q.options ?? []) {
+      const value = String(raw ?? "").trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      options.push({ value });
+    }
     const choiceType =
       q.type === "CHECKBOX"
         ? "CHECKBOX"
