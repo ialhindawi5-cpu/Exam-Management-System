@@ -390,9 +390,9 @@ export async function createOrSyncGoogleForm(
     return { ok: true, url: form.responderUri };
   } catch (e) {
     console.error("Google Form generation failed:", e);
+    const detail = e instanceof Error ? e.message : String(e);
     return {
-      error:
-        "Could not create the Google Form. Try reconnecting your Google account.",
+      error: `Could not create the Google Form. ${detail}`,
     };
   }
 }
