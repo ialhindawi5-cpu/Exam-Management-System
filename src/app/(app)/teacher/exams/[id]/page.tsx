@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/dal";
+import { aiEnabled } from "@/lib/ai";
 import {
   googleConfigured,
   getGoogleAccount,
@@ -13,6 +14,7 @@ import { ExamStatusActions } from "./exam-status-actions";
 import { ExamMetaForm } from "./exam-meta-form";
 import { GoogleFormPanel } from "./google-form-panel";
 import { ResponsesPanel } from "./responses-panel";
+import { PdfImportPanel } from "./pdf-import-panel";
 import {
   ExamQuestionsManager,
   type QuestionLite,
@@ -153,6 +155,14 @@ export default async function ExamBuilderPage({
           <ResponsesPanel examId={exam.id} />
         </div>
       )}
+
+      <div className="mb-6">
+        <PdfImportPanel
+          examId={exam.id}
+          examLanguage={exam.language}
+          enabled={aiEnabled()}
+        />
+      </div>
 
       {exam.examQuestions.length === 0 && (
         <Card className="mb-4 border-blue-200 bg-blue-50">

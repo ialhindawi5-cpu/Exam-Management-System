@@ -105,6 +105,102 @@ Use points appropriate to difficulty (easy 1, medium 2, hard 3).`;
   }));
 }
 
+// Question types the PDF importer (and AI generator) can produce. Checkbox /
+// dropdown are created manually, so we keep the model to this set.
+const PDF_TYPES: QuestionType[] = ["MCQ", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY"];
+
+// Harden one raw model item into a GeneratedQuestion, honouring its own type
+// and difficulty (the PDF importer returns a mix, unlike generateQuestions
+// which is asked for a single fixed type).
+function normalizeGenerated(raw: GeneratedQuestion): GeneratedQuestion {
+  const type = PDF_TYPES.includes(raw.type) ? raw.type : "SHORT_ANSWER";
+  const difficulty: Difficulty = (["EASY", "MEDIUM", "HARD"] as Difficulty[]).includes(
+    raw.difficulty,
+  )
+    ? raw.difficulty
+    : "MEDIUM";
+  return {
+    type,
+    difficulty,
+    text: String(raw.text ?? "").trim(),
+    options: type === "MCQ" ? (raw.options ?? []).map(String) : undefined,
+    correctAnswer:
+      (type === "MCQ" || type === "TRUE_FALSE") && raw.correctAnswer != null
+        ? String(raw.correctAnswer)
+        : undefined,
+    modelAnswer:
+      type === "SHORT_ANSWER" || type === "ESSAY"
+        ? String(raw.modelAnswer ?? "")
+        : undefined,
+    points: Number(raw.points) > 0 ? Number(raw.points) : 1,
+  };
+}
+
+// Read a PDF and turn it into exam questions. The model auto-detects intent:
+// if the PDF is already a question paper it extracts the questions (and any
+// indicated answers) faithfully; if it's study material it writes new ones.
+export async function generateQuestionsFromPdf(opts: {
+  pdfBase64: string;
+  count: number;
+  language: string;
+  subject?: string;
+  instructions?: string;
+}): Promise<GeneratedQuestion[]> {
+  const { pdfBase64, count, language, subject, instructions } = opts;
+  const langName =
+    language === "ar" ? "Arabic" : language === "fr" ? "French" : "English";
+
+  const system = `You are an expert exam author for the Lebanese (MEHE) school curriculum.
+You are given a PDF. Choose the mode that fits its content:
+- If the PDF already contains exam questions, EXTRACT them faithfully — keep the wording, the answer options, and any indicated correct answers.
+- If the PDF is study material (lecture notes, a textbook chapter, an article), GENERATE new curriculum-appropriate exam questions that test understanding of its content.
+Write all questions in ${langName}. Respond with JSON only — no prose.`;
+
+  const shapes = `Return a JSON array. Each item is one of:
+{"type":"MCQ","difficulty":"EASY"|"MEDIUM"|"HARD","text":string,"options":[2-5 strings],"correctAnswer":"<0-based index of the correct option, as a string>","points":number}
+{"type":"TRUE_FALSE","difficulty":...,"text":string,"correctAnswer":"true"|"false","points":number}
+{"type":"SHORT_ANSWER","difficulty":...,"text":string,"modelAnswer":string,"points":number}
+{"type":"ESSAY","difficulty":...,"text":string,"modelAnswer":string (key points / rubric),"points":number}`;
+
+  const prompt = `Produce up to ${count} question(s).
+${subject ? `Subject: ${subject}. ` : ""}${instructions ? `Additional instructions: ${instructions}\n` : ""}${shapes}
+If a correct answer is neither indicated in the PDF nor determinable, omit "correctAnswer" for MCQ/TRUE_FALSE, or give your best "modelAnswer" for open questions.
+Use points appropriate to difficulty (easy 1, medium 2, hard 3).`;
+
+  const msg = await client().messages.create({
+    model: MODEL,
+    max_tokens: 8192,
+    system,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: pdfBase64,
+            },
+          },
+          { type: "text", text: prompt },
+        ],
+      },
+    ],
+  });
+
+  const text = msg.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+
+  const items = extractJson<GeneratedQuestion[]>(text);
+  return items
+    .map(normalizeGenerated)
+    .filter((q) => q.text.length > 0)
+    .slice(0, count);
+}
+
 export type AiGrade = { score: number; feedback: string };
 
 export async function gradeOpenAnswer(opts: {
