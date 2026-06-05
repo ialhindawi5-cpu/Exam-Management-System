@@ -7,7 +7,14 @@ import { cn } from "@/components/ui";
 
 export type NavItem = { href: string; label: string };
 
-export function NavLinks({ items }: { items: NavItem[] }) {
+export function NavLinks({
+  items,
+  trailing,
+}: {
+  items: NavItem[];
+  // Rendered at the bottom of the mobile dropdown (e.g. the Log out button).
+  trailing?: React.ReactNode;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const isActive = (href: string) =>
@@ -84,6 +91,11 @@ export function NavLinks({ items }: { items: NavItem[] }) {
                   {item.label}
                 </Link>
               ))}
+              {trailing && (
+                <div className="mt-1 border-t border-gray-200 pt-2">
+                  {trailing}
+                </div>
+              )}
             </nav>
           </div>
         </>

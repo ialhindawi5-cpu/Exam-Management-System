@@ -42,7 +42,11 @@ export async function AppShell({
               )}
               <span className="truncate">{schoolName || "Exam System"}</span>
             </span>
-            <NavLinks items={nav} />
+            {/* On mobile the hamburger dropdown also carries Log out. */}
+            <NavLinks
+              items={nav}
+              trailing={<LogoutButton variant="ghost" className="w-full" />}
+            />
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <div className="hidden text-right sm:block">
@@ -50,7 +54,10 @@ export async function AppShell({
               <div className="text-xs text-gray-500">{user.email}</div>
             </div>
             <Badge color={roleColor[user.role]}>{user.role}</Badge>
-            <LogoutButton variant="ghost" />
+            {/* Header Log out is desktop-only; mobile uses the menu (above). */}
+            <div className="hidden lg:block">
+              <LogoutButton variant="ghost" />
+            </div>
           </div>
         </div>
       </header>
