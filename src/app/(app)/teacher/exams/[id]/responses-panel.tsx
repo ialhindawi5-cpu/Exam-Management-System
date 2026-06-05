@@ -101,9 +101,16 @@ export function ResponsesPanel({ examId }: { examId: string }) {
                   By question
                 </button>
               </div>
-              <Button variant="ghost" disabled={pending} onClick={load}>
-                {pending ? "Refreshing…" : "Refresh"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <a href={`/teacher/exams/${examId}/export-responses`}>
+                  <Button variant="secondary" disabled={pending}>
+                    Export to Excel
+                  </Button>
+                </a>
+                <Button variant="ghost" disabled={pending} onClick={load}>
+                  {pending ? "Refreshing…" : "Refresh"}
+                </Button>
+              </div>
             </div>
 
             {view === "student" ? (
