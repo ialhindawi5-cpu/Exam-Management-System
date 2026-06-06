@@ -27,6 +27,13 @@ export type CreatedForm = {
   editUrl: string;
 };
 
+// The Forms API rejects newlines in "displayed text" fields (item titles and
+// choice option values) with a 400 INVALID_ARGUMENT. Collapse any line breaks
+// (and the surrounding whitespace) into a single space so such text is accepted.
+function singleLine(s: string): string {
+  return s.replace(/\s*[\r\n]+\s*/g, " ").trim();
+}
+
 function trueFalseLabels(language: string): { yes: string; no: string } {
   if (language === "fr") return { yes: "Vrai", no: "Faux" };
   if (language === "ar") return { yes: "صح", no: "خطأ" };
@@ -62,7 +69,7 @@ function questionBody(q: FormQuestionInput): Record<string, unknown> {
     const seen = new Set<string>();
     const options: { value: string }[] = [];
     for (const raw of q.options ?? []) {
-      const value = String(raw ?? "").trim();
+      const value = singleLine(String(raw ?? ""));
       if (!value || seen.has(value)) continue;
       seen.add(value);
       options.push({ value });
@@ -96,7 +103,7 @@ function createItemRequests(questions: FormQuestionInput[], startIndex = 0) {
   return questions.map((q, i) => ({
     createItem: {
       item: {
-        title: `${i + 1}. ${q.text}`,
+        title: singleLine(`${i + 1}. ${q.text}`),
         questionItem: { question: questionBody(q) },
       },
       location: { index: startIndex + i },
@@ -165,7 +172,10 @@ export async function createExamForm(opts: {
     {
       method: "POST",
       body: JSON.stringify({
-        info: { title: opts.title, documentTitle: opts.title },
+        info: {
+          title: singleLine(opts.title),
+          documentTitle: singleLine(opts.title),
+        },
       }),
     },
   );
@@ -370,7 +380,9 @@ function correctChoiceValues(q: FormQuestionInput): string[] {
     return [];
   }
 
-  const options = q.options ?? [];
+  // Match the option values exactly as they were written to the form, so the
+  // pushed correct answer lines up with a real choice (see questionBody).
+  const options = (q.options ?? []).map(singleLine);
   // correctAnswer stores an index into options (or, defensively, the value).
   const resolve = (raw: string): string | null => {
     const trimmed = raw.trim();
@@ -378,7 +390,8 @@ function correctChoiceValues(q: FormQuestionInput): string[] {
     if (Number.isInteger(idx) && idx >= 0 && idx < options.length) {
       return options[idx];
     }
-    if (trimmed && options.includes(trimmed)) return trimmed;
+    const value = singleLine(trimmed);
+    if (value && options.includes(value)) return value;
     return null;
   };
 
