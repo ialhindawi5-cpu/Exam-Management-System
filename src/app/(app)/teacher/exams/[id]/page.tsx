@@ -13,6 +13,7 @@ import { Card, CardBody, Badge, Button } from "@/components/ui";
 import { ExamStatusActions } from "./exam-status-actions";
 import { ExamMetaForm } from "./exam-meta-form";
 import { GoogleFormPanel } from "./google-form-panel";
+import { SchedulePublish } from "./schedule-publish";
 import { ResponsesPanel } from "./responses-panel";
 import { PdfImportPanel } from "./pdf-import-panel";
 import {
@@ -128,6 +129,17 @@ export default async function ExamBuilderPage({
         />
       </div>
 
+      {exam.status !== "PUBLISHED" && (
+        <div className="mb-6">
+          <SchedulePublish
+            examId={exam.id}
+            scheduledFor={exam.scheduledPublishAt?.toISOString() ?? null}
+            questionCount={exam.examQuestions.length}
+            googleReady={googleConfigured() && Boolean(googleAccount)}
+          />
+        </div>
+      )}
+
       <div className="mb-6">
         <GoogleFormPanel
           examId={exam.id}
@@ -152,7 +164,7 @@ export default async function ExamBuilderPage({
 
       {exam.googleFormId && (
         <div className="mb-6">
-          <ResponsesPanel examId={exam.id} />
+          <ResponsesPanel examId={exam.id} aiEnabled={aiEnabled()} />
         </div>
       )}
 

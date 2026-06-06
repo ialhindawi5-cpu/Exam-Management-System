@@ -50,7 +50,9 @@ export function RegisterForm({
                 aria-pressed={showPassword}
                 tabIndex={-1}
               >
-                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                {/* open eye only while the password is visible; slashed eye
+                    (click to reveal) while it's masked — matches the login form */}
+                {showPassword ? <EyeIcon /> : <EyeOffIcon />}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
+import Anthropic from "@anthropic-ai/sdk";
 import type AnthropicNS from "@anthropic-ai/sdk";
 import { getCurrentUser } from "@/lib/dal";
-import { aiEnabled, anthropicClient, MODEL } from "@/lib/ai";
+import { aiUnavailableReason, anthropicClient, MODEL } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
 import type { Role, Prisma, QuestionType, Difficulty } from "@prisma/client";
 
@@ -231,11 +232,9 @@ export async function POST(req: Request) {
   if (!user || user.accessStatus !== "APPROVED") {
     return new Response("Unauthorized", { status: 401 });
   }
-  if (!aiEnabled()) {
-    return new Response(
-      "The AI assistant is not configured. Ask your administrator to add an ANTHROPIC_API_KEY.",
-      { status: 200 },
-    );
+  const unavailable = aiUnavailableReason();
+  if (unavailable) {
+    return new Response(unavailable, { status: 200 });
   }
 
   let body: { messages?: ChatMessage[] };
@@ -307,7 +306,20 @@ export async function POST(req: Request) {
       finalText = text;
       break;
     }
-  } catch {
+  } catch (err) {
+    // Surface the cause so a misconfigured key isn't reported as a generic glitch.
+    if (err instanceof Anthropic.AuthenticationError) {
+      return new Response(
+        'The AI assistant\'s API key was rejected. Ask your administrator to set a valid ANTHROPIC_API_KEY (it must start with "sk-ant-").',
+        { status: 200 },
+      );
+    }
+    if (err instanceof Anthropic.RateLimitError) {
+      return new Response(
+        "The AI assistant is busy right now. Please try again in a moment.",
+        { status: 200 },
+      );
+    }
     return new Response("The assistant ran into an error. Please try again.", {
       status: 200,
     });

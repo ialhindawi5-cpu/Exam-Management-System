@@ -194,6 +194,10 @@ model Exam {
   googleFormCreatedAt DateTime?
   answerKeyReleasedAt DateTime? // when correct answers/points were pushed for grading
 
+  // When set, a scheduled job auto-publishes the exam (and opens its Google
+  // Form) at this time. Cleared once it fires or the teacher publishes manually.
+  scheduledPublishAt DateTime?
+
   subjectId String?
   subject   Subject? @relation(fields: [subjectId], references: [id])
 

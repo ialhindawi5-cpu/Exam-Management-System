@@ -19,7 +19,14 @@ import {
   type FormQuestionInput,
   type ExamResponse,
 } from "@/lib/google-forms";
-import type { Difficulty, ExamStatus, Prisma } from "@prisma/client";
+import { gradeOpenAnswer, aiEnabled, aiUnavailableReason } from "@/lib/ai";
+import type {
+  Difficulty,
+  Exam,
+  ExamStatus,
+  Prisma,
+  QuestionType,
+} from "@prisma/client";
 
 export type ExamFormState = { error?: string } | undefined;
 
@@ -28,6 +35,7 @@ export type ExamFormState = { error?: string } | undefined;
 export type ExamResponseQuestion = {
   index: number;
   title: string;
+  type: QuestionType;
   maxPoints: number;
   keywords: { text: string; points: number }[];
 };
@@ -291,6 +299,62 @@ export async function autoFillByDifficulty(
   return { added: toCreate.length };
 }
 
+// Set the exam's status in the DB and keep its Google Form (if any) in sync:
+// publishing (re)opens the form — creating it on first publish — while DRAFT or
+// CLOSED marks it closed. Shared by the teacher action and the scheduler, so it
+// takes the owning `teacherId` explicitly rather than reading the session.
+// All form work is best-effort: a Google failure never blocks the status change.
+async function applyExamStatus(
+  exam: Exam,
+  teacherId: string,
+  status: ExamStatus,
+): Promise<void> {
+  await prisma.exam.update({ where: { id: exam.id }, data: { status } });
+
+  if (!googleConfigured()) return;
+  try {
+    const account = await getGoogleAccount(teacherId);
+    if (!account) return;
+    const accessToken = await getValidAccessToken(teacherId);
+    const formDescription = await buildFormDescription(exam);
+
+    if (status === "PUBLISHED" && !exam.googleFormId) {
+      // First publish with no form yet → generate one from the questions.
+      const questions = await loadFormQuestions(exam.id);
+      if (questions.length > 0) {
+        const logo = await resolveLogoForExam(exam);
+        const form = await createExamForm({
+          accessToken,
+          title: exam.title,
+          description: formDescription,
+          questions,
+          logoUrl: logo?.logoUrl ?? null,
+          logoAlt: logo?.logoAlt ?? null,
+        });
+        await prisma.exam.update({
+          where: { id: exam.id },
+          data: {
+            googleFormId: form.formId,
+            googleFormUrl: form.responderUri,
+            googleFormEditUrl: form.editUrl,
+            googleFormCreatedAt: new Date(),
+          },
+        });
+      }
+    } else if (exam.googleFormId) {
+      // A form already exists → reflect the new state on it.
+      await setFormResponsesClosed({
+        accessToken,
+        formId: exam.googleFormId,
+        closed: status !== "PUBLISHED",
+        description: formDescription,
+      });
+    }
+  } catch (e) {
+    console.error("Syncing Google Form to exam status failed:", e);
+  }
+}
+
 export async function setExamStatus(examId: string, status: ExamStatus) {
   const teacher = await requireRole("TEACHER");
   const exam = await ownedExam(examId, teacher.id);
@@ -302,60 +366,114 @@ export async function setExamStatus(examId: string, status: ExamStatus) {
       return { error: "Add at least one question before publishing." };
     }
   }
-  await prisma.exam.update({ where: { id: examId }, data: { status } });
 
-  // Keep the Google Form (if any) in sync with the exam's published state. All
-  // form work is best-effort: a Google failure must never block the status
-  // change — the teacher can retry from the exam page.
-  if (googleConfigured()) {
-    try {
-      const account = await getGoogleAccount(teacher.id);
-      if (account) {
-        const accessToken = await getValidAccessToken(teacher.id);
-        const formDescription = await buildFormDescription(exam);
+  await applyExamStatus(exam, teacher.id, status);
 
-        if (status === "PUBLISHED" && !exam.googleFormId) {
-          // First publish with no form yet → generate one from the questions.
-          const questions = await loadFormQuestions(examId);
-          if (questions.length > 0) {
-            const logo = await resolveLogoForExam(exam);
-            const form = await createExamForm({
-              accessToken,
-              title: exam.title,
-              description: formDescription,
-              questions,
-              logoUrl: logo?.logoUrl ?? null,
-              logoAlt: logo?.logoAlt ?? null,
-            });
-            await prisma.exam.update({
-              where: { id: examId },
-              data: {
-                googleFormId: form.formId,
-                googleFormUrl: form.responderUri,
-                googleFormEditUrl: form.editUrl,
-                googleFormCreatedAt: new Date(),
-              },
-            });
-          }
-        } else if (exam.googleFormId) {
-          // A form already exists → reflect the new state on it. Publishing
-          // (re)opens the form; unpublishing (DRAFT) or closing marks it closed.
-          await setFormResponsesClosed({
-            accessToken,
-            formId: exam.googleFormId,
-            closed: status !== "PUBLISHED",
-            description: formDescription,
-          });
-        }
-      }
-    } catch (e) {
-      console.error("Syncing Google Form to exam status failed:", e);
-    }
+  // A manual status change overrides any pending scheduled publish.
+  if (exam.scheduledPublishAt) {
+    await prisma.exam.update({
+      where: { id: examId },
+      data: { scheduledPublishAt: null },
+    });
   }
 
   revalidatePath(`/teacher/exams/${examId}`);
   revalidatePath("/teacher/exams");
   return { ok: true };
+}
+
+// Schedule (or, with `whenIso === null`, cancel) automatic publishing of an
+// exam. The actual publish is performed later by the cron job (publishDueExams).
+export async function scheduleExamPublish(
+  examId: string,
+  whenIso: string | null,
+): Promise<{ ok: true; scheduledFor: string | null } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+
+  if (whenIso === null) {
+    await prisma.exam.update({
+      where: { id: examId },
+      data: { scheduledPublishAt: null },
+    });
+    revalidatePath(`/teacher/exams/${examId}`);
+    return { ok: true, scheduledFor: null };
+  }
+
+  if (exam.status === "PUBLISHED") {
+    return { error: "This exam is already published." };
+  }
+  const count = await prisma.examQuestion.count({ where: { examId } });
+  if (count === 0) {
+    return { error: "Add at least one question before scheduling." };
+  }
+  const when = new Date(whenIso);
+  if (Number.isNaN(when.getTime())) {
+    return { error: "Choose a valid date and time." };
+  }
+  if (when.getTime() <= Date.now()) {
+    return { error: "Pick a time in the future." };
+  }
+
+  await prisma.exam.update({
+    where: { id: examId },
+    data: { scheduledPublishAt: when },
+  });
+  revalidatePath(`/teacher/exams/${examId}`);
+  return { ok: true, scheduledFor: when.toISOString() };
+}
+
+export type PublishDueResult =
+  | { published: number; skipped: number; failed: number }
+  | { error: string };
+
+// Publish every exam whose scheduled time has arrived. Invoked by the cron
+// route; guarded by CRON_SECRET so it can't be triggered by clients. Each exam
+// is published as its own teacher (using that teacher's stored Google account).
+export async function publishDueExams(secret: string): Promise<PublishDueResult> {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || secret !== expected) return { error: "unauthorized" };
+
+  const due = await prisma.exam.findMany({
+    where: {
+      status: "DRAFT",
+      scheduledPublishAt: { not: null, lte: new Date() },
+    },
+  });
+
+  let published = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const exam of due) {
+    try {
+      const count = await prisma.examQuestion.count({
+        where: { examId: exam.id },
+      });
+      if (count === 0) {
+        // Questions were removed after scheduling — drop the schedule so it
+        // doesn't retry forever, and leave the exam as a draft.
+        await prisma.exam.update({
+          where: { id: exam.id },
+          data: { scheduledPublishAt: null },
+        });
+        skipped += 1;
+        continue;
+      }
+      await applyExamStatus(exam, exam.createdById, "PUBLISHED");
+      await prisma.exam.update({
+        where: { id: exam.id },
+        data: { scheduledPublishAt: null },
+      });
+      published += 1;
+      revalidatePath(`/teacher/exams/${exam.id}`);
+    } catch (e) {
+      console.error(`Scheduled publish failed for exam ${exam.id}:`, e);
+      failed += 1;
+    }
+  }
+  if (published > 0) revalidatePath("/teacher/exams");
+  return { published, skipped, failed };
 }
 
 // Create the exam's Google Form (or re-sync its questions if one exists).
@@ -505,6 +623,9 @@ export async function getExamResponses(
       return {
         index: fq.index,
         title: fq.title,
+        // "MCQ" when there's no matching DB question, so the open-answer-only
+        // AI grading affordance stays hidden rather than failing on click.
+        type: eq?.question.type ?? "MCQ",
         maxPoints: eq ? (eq.points ?? eq.question.points) : (fq.points ?? 0),
         keywords: parseDbKeywords(eq?.question.keywords),
       };
@@ -516,6 +637,58 @@ export async function getExamResponses(
       error: "Could not load responses. Try reconnecting your Google account.",
       needsReconnect: true,
     };
+  }
+}
+
+export type AiGradeResult =
+  | { score: number; feedback: string; maxPoints: number }
+  | { error: string };
+
+// AI-grade one student's answer to an open-ended (short answer / essay)
+// question, scored against the question's stored model answer. This is a
+// teacher aid shown in the responses panel — the score is advisory and isn't
+// written back to Google Forms (the teacher enters the final mark there).
+export async function gradeOpenAnswerAction(
+  examId: string,
+  questionIndex: number,
+  studentAnswer: string,
+): Promise<AiGradeResult> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  if (!aiEnabled()) {
+    return { error: aiUnavailableReason() ?? "AI grading is not configured." };
+  }
+
+  const examQuestions = await prisma.examQuestion.findMany({
+    where: { examId },
+    orderBy: { order: "asc" },
+    include: { question: true },
+  });
+  const eq = examQuestions[questionIndex];
+  if (!eq) return { error: "Question not found." };
+
+  const q = eq.question;
+  if (q.type !== "SHORT_ANSWER" && q.type !== "ESSAY") {
+    return { error: "AI grading applies to open-ended questions only." };
+  }
+  if (!studentAnswer.trim()) {
+    return { error: "There is no answer to grade." };
+  }
+
+  const maxPoints = eq.points ?? q.points;
+  try {
+    const { score, feedback } = await gradeOpenAnswer({
+      questionText: q.text,
+      modelAnswer: q.modelAnswer,
+      studentAnswer,
+      maxPoints,
+      language: q.language,
+    });
+    return { score, feedback, maxPoints };
+  } catch (e) {
+    console.error("AI grading failed:", e);
+    return { error: "AI grading failed. Please try again." };
   }
 }
 

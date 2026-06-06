@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import {
   getExamResponses,
+  gradeOpenAnswerAction,
   type ExamResponseQuestion,
 } from "@/lib/exam-actions";
 import type { ExamResponse } from "@/lib/google-forms";
@@ -10,7 +11,17 @@ import { Card, CardBody, Button, Badge } from "@/components/ui";
 
 type View = "student" | "question";
 
-export function ResponsesPanel({ examId }: { examId: string }) {
+function isOpen(type: ExamResponseQuestion["type"]): boolean {
+  return type === "SHORT_ANSWER" || type === "ESSAY";
+}
+
+export function ResponsesPanel({
+  examId,
+  aiEnabled,
+}: {
+  examId: string;
+  aiEnabled: boolean;
+}) {
   const [pending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +125,12 @@ export function ResponsesPanel({ examId }: { examId: string }) {
             </div>
 
             {view === "student" ? (
-              <StudentView questions={questions} responses={responses} />
+              <StudentView
+                examId={examId}
+                aiEnabled={aiEnabled}
+                questions={questions}
+                responses={responses}
+              />
             ) : (
               <QuestionView questions={questions} responses={responses} />
             )}
@@ -225,11 +241,72 @@ function KeywordRubric({
   );
 }
 
+// AI grading aid for open-ended answers: on demand, asks the model to score the
+// answer against the question's stored model answer and explain why. Advisory
+// only — the teacher enters the final mark in Google Forms.
+function AiGrade({
+  examId,
+  questionIndex,
+  answer,
+}: {
+  examId: string;
+  questionIndex: number;
+  answer: string;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<
+    { score: number; feedback: string; maxPoints: number } | null
+  >(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function grade() {
+    setError(null);
+    startTransition(async () => {
+      const res = await gradeOpenAnswerAction(examId, questionIndex, answer);
+      if ("error" in res) {
+        setError(res.error);
+        setResult(null);
+      } else {
+        setResult(res);
+      }
+    });
+  }
+
+  return (
+    <div className="mt-1.5 ml-3">
+      <button
+        type="button"
+        onClick={grade}
+        disabled={pending}
+        className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-brand hover:bg-blue-100 disabled:opacity-50"
+      >
+        {pending ? "Grading…" : result ? "Re-grade with AI" : "Grade with AI"}
+      </button>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {result && (
+        <div className="mt-1 rounded-md border border-blue-100 bg-blue-50/50 p-2 text-xs">
+          <div className="font-semibold text-gray-800">
+            AI suggestion: {result.score} / {result.maxPoints}
+          </div>
+          <p className="mt-0.5 text-gray-600">{result.feedback}</p>
+          <p className="mt-1 text-[10px] uppercase tracking-wide text-gray-400">
+            Advisory — enter the final mark in Google Forms
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One card per submission, listing every question and that student's answer.
 function StudentView({
+  examId,
+  aiEnabled,
   questions,
   responses,
 }: {
+  examId: string;
+  aiEnabled: boolean;
   questions: ExamResponseQuestion[];
   responses: ExamResponse[];
 }) {
@@ -276,6 +353,14 @@ function StudentView({
                         keywords={q.keywords}
                         answer={a?.value ?? ""}
                         maxPoints={q.maxPoints}
+                      />
+                    )}
+                    {aiEnabled && isOpen(q.type) && (a?.value ?? "").trim() && (
+                      <AiGrade
+                        key={`ai:${q.index}:${a?.value ?? ""}`}
+                        examId={examId}
+                        questionIndex={q.index}
+                        answer={a?.value ?? ""}
                       />
                     )}
                   </li>

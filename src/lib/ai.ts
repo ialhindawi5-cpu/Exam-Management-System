@@ -20,20 +20,111 @@ export function anthropicClient(): Anthropic {
   return client();
 }
 
+// AI is only usable with a real Anthropic key (they start with "sk-ant-").
+// A present-but-wrong key — e.g. an OpenAI "sk-proj-…" key — would otherwise
+// pass a naive presence check and then fail every call with a 401.
 export function aiEnabled(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  const key = process.env.ANTHROPIC_API_KEY;
+  return Boolean(key && key.startsWith("sk-ant-"));
 }
 
-// Pull the first JSON value (object or array) out of a model response.
-function extractJson<T>(text: string): T {
+// Why AI is unavailable, as a user-facing sentence — or null when it's fine.
+// Lets callers tell "no key set" apart from "wrong key set".
+export function aiUnavailableReason(): string | null {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) {
+    return "The AI assistant is not configured. Ask your administrator to add an ANTHROPIC_API_KEY.";
+  }
+  if (!key.startsWith("sk-ant-")) {
+    return 'The AI assistant\'s API key looks invalid — Anthropic keys start with "sk-ant-". Ask your administrator to set a valid ANTHROPIC_API_KEY.';
+  }
+  return null;
+}
+
+// Concatenate the text blocks of a model response.
+function textOf(msg: Anthropic.Message): string {
+  return msg.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+}
+
+// Last-resort parse for when structured outputs aren't available (e.g. a model
+// override that doesn't support them): pull the first JSON value out of prose.
+function salvageJson<T>(text: string): T {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = fenced ? fenced[1] : text;
   const start = raw.search(/[[{]/);
   if (start === -1) throw new Error("No JSON found in AI response.");
-  // Find the matching end by scanning from the last bracket.
   const end = Math.max(raw.lastIndexOf("]"), raw.lastIndexOf("}"));
   return JSON.parse(raw.slice(start, end + 1)) as T;
 }
+
+function parseModelJson<T>(text: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return salvageJson<T>(text);
+  }
+}
+
+// Run a request that must return JSON matching `schema`. Structured outputs
+// (output_config.format) make the model emit schema-valid JSON, so no brittle
+// extraction is needed. If the configured model doesn't support structured
+// outputs the API rejects the request — we then retry without it and salvage
+// the JSON from the text, so a model override never silently breaks AI.
+async function createJson<T>(opts: {
+  maxTokens: number;
+  system: string;
+  content: string | Anthropic.ContentBlockParam[];
+  schema: Record<string, unknown>;
+}): Promise<T> {
+  const c = client();
+  const base = {
+    model: MODEL,
+    max_tokens: opts.maxTokens,
+    system: opts.system,
+    messages: [{ role: "user" as const, content: opts.content }],
+  };
+  try {
+    const msg = await c.messages.create({
+      ...base,
+      output_config: { format: { type: "json_schema", schema: opts.schema } },
+    });
+    return parseModelJson<T>(textOf(msg));
+  } catch (e) {
+    if (e instanceof Anthropic.BadRequestError) {
+      const msg = await c.messages.create(base);
+      return parseModelJson<T>(textOf(msg));
+    }
+    throw e;
+  }
+}
+
+// Shared schema for a generated question. Fields beyond text/points are
+// optional because they only apply to certain types; the normalizers below
+// reconcile each item against its (or the requested) type.
+const QUESTION_ITEM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    type: { type: "string", enum: ["MCQ", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY"] },
+    difficulty: { type: "string", enum: ["EASY", "MEDIUM", "HARD"] },
+    text: { type: "string" },
+    options: { type: "array", items: { type: "string" } },
+    correctAnswer: { type: "string" },
+    modelAnswer: { type: "string" },
+    points: { type: "number" },
+  },
+  required: ["text", "points"],
+} as const;
+
+const QUESTIONS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { questions: { type: "array", items: QUESTION_ITEM_SCHEMA } },
+  required: ["questions"],
+} as const;
 
 export type GeneratedQuestion = {
   type: QuestionType;
@@ -71,22 +162,15 @@ Write clear, curriculum-appropriate questions. Respond with JSON only — no pro
 
   const prompt = `Generate ${count} ${difficulty} ${type} question(s) in ${langName}.
 ${subject ? `Subject: ${subject}. ` : ""}Topic: ${topic}.
-Return a JSON array. ${shape}.
+Return a JSON object {"questions": [...]} whose items are: ${shape}.
 Use points appropriate to difficulty (easy 1, medium 2, hard 3).`;
 
-  const msg = await client().messages.create({
-    model: MODEL,
-    max_tokens: 2048,
+  const { questions: items } = await createJson<{ questions: GeneratedQuestion[] }>({
+    maxTokens: 2048,
     system,
-    messages: [{ role: "user", content: prompt }],
+    content: prompt,
+    schema: QUESTIONS_SCHEMA,
   });
-
-  const text = msg.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
-  const items = extractJson<GeneratedQuestion[]>(text);
   // Normalize / harden the output.
   return items.map((q) => ({
     type,
@@ -156,7 +240,7 @@ You are given a PDF. Choose the mode that fits its content:
 - If the PDF is study material (lecture notes, a textbook chapter, an article), GENERATE new curriculum-appropriate exam questions that test understanding of its content.
 Write all questions in ${langName}. Respond with JSON only — no prose.`;
 
-  const shapes = `Return a JSON array. Each item is one of:
+  const shapes = `Return a JSON object {"questions": [...]} whose items are each one of:
 {"type":"MCQ","difficulty":"EASY"|"MEDIUM"|"HARD","text":string,"options":[2-5 strings],"correctAnswer":"<0-based index of the correct option, as a string>","points":number}
 {"type":"TRUE_FALSE","difficulty":...,"text":string,"correctAnswer":"true"|"false","points":number}
 {"type":"SHORT_ANSWER","difficulty":...,"text":string,"modelAnswer":string,"points":number}
@@ -167,34 +251,22 @@ ${subject ? `Subject: ${subject}. ` : ""}${instructions ? `Additional instructio
 If a correct answer is neither indicated in the PDF nor determinable, omit "correctAnswer" for MCQ/TRUE_FALSE, or give your best "modelAnswer" for open questions.
 Use points appropriate to difficulty (easy 1, medium 2, hard 3).`;
 
-  const msg = await client().messages.create({
-    model: MODEL,
-    max_tokens: 8192,
+  const { questions: items } = await createJson<{ questions: GeneratedQuestion[] }>({
+    maxTokens: 8192,
     system,
-    messages: [
+    content: [
       {
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: pdfBase64,
-            },
-          },
-          { type: "text", text: prompt },
-        ],
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: pdfBase64,
+        },
       },
+      { type: "text", text: prompt },
     ],
+    schema: QUESTIONS_SCHEMA,
   });
-
-  const text = msg.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
-  const items = extractJson<GeneratedQuestion[]>(text);
   return items
     .map(normalizeGenerated)
     .filter((q) => q.text.length > 0)
@@ -224,19 +296,20 @@ ${modelAnswer ? `Model answer / rubric: ${modelAnswer}` : "No model answer provi
 Maximum points: ${maxPoints}
 Student's answer: ${studentAnswer || "(no answer)"}`;
 
-  const msg = await client().messages.create({
-    model: MODEL,
-    max_tokens: 512,
+  const parsed = await createJson<AiGrade>({
+    maxTokens: 512,
     system,
-    messages: [{ role: "user", content: prompt }],
+    content: prompt,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        score: { type: "number" },
+        feedback: { type: "string" },
+      },
+      required: ["score", "feedback"],
+    },
   });
-
-  const text = msg.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
-  const parsed = extractJson<AiGrade>(text);
   let score = Number(parsed.score);
   if (!Number.isFinite(score)) score = 0;
   score = Math.max(0, Math.min(maxPoints, score));
