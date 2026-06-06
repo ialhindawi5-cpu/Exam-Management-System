@@ -5,6 +5,7 @@ import {
   createOrSyncGoogleForm,
   releaseExamAnswerKey,
   setExamEmailCollection,
+  resetGoogleForm,
 } from "@/lib/exam-actions";
 import { Card, CardBody, Button, Badge } from "@/components/ui";
 import type { ExamStatus } from "@prisma/client";
@@ -320,6 +321,30 @@ export function GoogleFormPanel({
                   >
                     Re-sync questions to form
                   </Button>
+                </div>
+
+                {/* Start a fresh form under the currently-connected account.
+                    Use this when the form was created by a different Google
+                    account (operations on it fail with "permission denied"). */}
+                <div className="border-t border-gray-100 pt-3">
+                  <Button
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "Unlink the current form and start a new one under the connected Google account? The old form (and any responses) stays in its original account. You'll then click “Create Google Form”.",
+                        )
+                      )
+                        run(() => resetGoogleForm(examId));
+                    }}
+                  >
+                    Create a new form under this account
+                  </Button>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Use this if the form was made with a different Google account
+                    and you get a “permission denied” error.
+                  </p>
                 </div>
               </div>
             )}

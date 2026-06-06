@@ -590,6 +590,30 @@ export async function publishDueExams(secret: string): Promise<PublishDueResult>
   return { published, skipped, failed };
 }
 
+// Unlink the exam's Google Form in our DB so a fresh one can be created — used
+// when the form is owned by a different Google account than the one now
+// connected (operations on it would 403). The original form is left untouched
+// in its owner's Drive; we just forget the link here.
+export async function resetGoogleForm(
+  examId: string,
+): Promise<{ ok: true } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  await prisma.exam.update({
+    where: { id: examId },
+    data: {
+      googleFormId: null,
+      googleFormUrl: null,
+      googleFormEditUrl: null,
+      googleFormCreatedAt: null,
+      answerKeyReleasedAt: null,
+    },
+  });
+  revalidatePath(`/teacher/exams/${examId}`);
+  return { ok: true };
+}
+
 // Create the exam's Google Form (or re-sync its questions if one exists).
 // Returns the responder URL students use to take the exam.
 export async function createOrSyncGoogleForm(
