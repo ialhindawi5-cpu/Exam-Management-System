@@ -16,6 +16,7 @@ import {
   listFormResponses,
   setEmailCollection,
   setFormResponsesClosed,
+  setFormAcceptingResponses,
   type FormQuestionInput,
   type ExamResponse,
 } from "@/lib/google-forms";
@@ -340,9 +341,23 @@ async function applyExamStatus(
             googleFormCreatedAt: new Date(),
           },
         });
+        // Publish it so students can submit (API forms are unpublished by
+        // default since 2026-03-31).
+        await setFormAcceptingResponses({
+          accessToken,
+          formId: form.formId,
+          accepting: true,
+        });
       }
     } else if (exam.googleFormId) {
-      // A form already exists → reflect the new state on it.
+      // A form already exists → reflect the new state on it: the publish toggle
+      // is the real open/stop-responses switch; the banner is the visible
+      // signal (and the fallback for legacy forms without publish settings).
+      await setFormAcceptingResponses({
+        accessToken,
+        formId: exam.googleFormId,
+        accepting: status === "PUBLISHED",
+      });
       await setFormResponsesClosed({
         accessToken,
         formId: exam.googleFormId,
@@ -616,6 +631,15 @@ export async function createOrSyncGoogleForm(
         answerKeyReleasedAt: null,
       },
     });
+    // If the exam is already published, open the new form for responses
+    // (API forms are unpublished by default since 2026-03-31).
+    if (exam.status === "PUBLISHED") {
+      await setFormAcceptingResponses({
+        accessToken,
+        formId: form.formId,
+        accepting: true,
+      });
+    }
     revalidatePath(`/teacher/exams/${examId}`);
     return { ok: true, url: form.responderUri };
   } catch (e) {

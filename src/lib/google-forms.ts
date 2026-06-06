@@ -262,9 +262,9 @@ export async function setEmailCollection(opts: {
 }
 
 // Banner prepended to a form's description while the exam is unpublished/closed.
-// Google's Forms API has no "accepting responses" toggle, so this visible notice
-// is the best automated signal that the exam is closed; the teacher still has to
-// flip "Accepting responses" off in the Forms UI for a hard stop.
+// A visible signal that pairs with setFormAcceptingResponses: the toggle is the
+// hard stop on forms that support it (created via the 2026+ publish model),
+// while this banner also covers legacy forms where the toggle isn't available.
 export const FORM_CLOSED_BANNER =
   "⛔ This exam is closed — responses are no longer being accepted.";
 
@@ -297,6 +297,37 @@ export async function setFormResponsesClosed(opts: {
       ],
     }),
   });
+}
+
+// Publish a form and turn response acceptance on or off via the 2026 publish
+// model (forms.setPublishSettings). This is the real "stop accepting responses"
+// switch — `isAcceptingResponses: false` keeps the form visible but blocks new
+// submissions. Forms created via the API since 2026-03-31 are unpublished by
+// default, so we also set isPublished: true to actually open them.
+//
+// Best-effort and non-throwing: legacy forms created before the publish model
+// have no publishSettings and return an error; we log and return false so the
+// caller falls back to the description banner. Needs only the forms.body scope.
+export async function setFormAcceptingResponses(opts: {
+  accessToken: string;
+  formId: string;
+  accepting: boolean;
+}): Promise<boolean> {
+  try {
+    await formsFetch(opts.accessToken, `/forms/${opts.formId}:setPublishSettings`, {
+      method: "POST",
+      body: JSON.stringify({
+        publishSettings: {
+          publishState: { isPublished: true, isAcceptingResponses: opts.accepting },
+        },
+        updateMask: "publishState",
+      }),
+    });
+    return true;
+  } catch (e) {
+    console.error("setPublishSettings failed (legacy form?):", e);
+    return false;
+  }
 }
 
 // Read whether the form currently collects respondent emails. Returns null if

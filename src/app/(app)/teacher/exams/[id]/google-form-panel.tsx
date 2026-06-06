@@ -145,11 +145,11 @@ export function GoogleFormPanel({
                     <span className="font-medium">
                       {examStatus === "DRAFT" ? "unpublished" : "closed"}
                     </span>
-                    . A “closed” notice has been added to the form. Google
-                    doesn&apos;t let apps stop a form from accepting responses, so
-                    to fully block new submissions, open the form and turn off{" "}
+                    . The form has been set to stop accepting responses and shows
+                    a “closed” notice. For older forms created before 2026, also
+                    turn off{" "}
                     <span className="font-medium">Accepting responses</span> on the
-                    Responses tab.
+                    Responses tab to be sure.
                     {form.editUrl && (
                       <>
                         {" "}
@@ -163,7 +163,7 @@ export function GoogleFormPanel({
                         </a>
                       </>
                     )}{" "}
-                    Re-publishing the exam removes the notice.
+                    Re-publishing the exam reopens it.
                   </div>
                 )}
 

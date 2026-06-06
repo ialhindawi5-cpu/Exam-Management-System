@@ -59,8 +59,8 @@ export function SchedulePublish({
               scheduledFor={scheduledCloseFor}
               title="Close"
               actionLabel="Schedule close"
-              description="Mark the form closed at this time so students see a “closed” notice."
-              note="Google's API can't stop a form from accepting responses — it only adds a closed banner. To fully block submissions, also turn off “Accepting responses” in the form afterward."
+              description="Stop the Google Form from accepting responses at this time, and show a closed notice."
+              note="Forms created before 2026 may also need “Accepting responses” turned off manually in the Responses tab."
             />
           )}
         </div>
