@@ -189,7 +189,7 @@ export function QuestionForm({
                 id="points"
                 name="points"
                 type="number"
-                min="0.5"
+                min="0"
                 step="0.5"
                 defaultValue={defaults.points}
                 required

@@ -64,8 +64,8 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
     return { error: "Invalid question type." };
   }
   if (!text) return { error: "Question text is required." };
-  if (!Number.isFinite(points) || points <= 0) {
-    return { error: "Points must be a positive number." };
+  if (!Number.isFinite(points) || points < 0) {
+    return { error: "Points must be zero or a positive number." };
   }
 
   const imageUrl = (formData.get("imageUrl") as string) || null;
