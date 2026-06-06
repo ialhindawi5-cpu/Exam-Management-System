@@ -17,6 +17,7 @@ import {
   setEmailCollection,
   setFormResponsesClosed,
   setFormAcceptingResponses,
+  grantPublishedReaderAccess,
   type FormQuestionInput,
   type ExamResponse,
 } from "@/lib/google-forms";
@@ -341,13 +342,14 @@ async function applyExamStatus(
             googleFormCreatedAt: new Date(),
           },
         });
-        // Publish it so students can submit (API forms are unpublished by
-        // default since 2026-03-31).
+        // Publish it and open link access so students can submit (API forms are
+        // unpublished and not link-accessible by default since 2026-03-31).
         await setFormAcceptingResponses({
           accessToken,
           formId: form.formId,
           accepting: true,
         });
+        await grantPublishedReaderAccess({ accessToken, formId: form.formId });
       }
     } else if (exam.googleFormId) {
       // A form already exists → reflect the new state on it: the publish toggle
@@ -358,6 +360,12 @@ async function applyExamStatus(
         formId: exam.googleFormId,
         accepting: status === "PUBLISHED",
       });
+      if (status === "PUBLISHED") {
+        await grantPublishedReaderAccess({
+          accessToken,
+          formId: exam.googleFormId,
+        });
+      }
       await setFormResponsesClosed({
         accessToken,
         formId: exam.googleFormId,
@@ -631,14 +639,16 @@ export async function createOrSyncGoogleForm(
         answerKeyReleasedAt: null,
       },
     });
-    // If the exam is already published, open the new form for responses
-    // (API forms are unpublished by default since 2026-03-31).
+    // If the exam is already published, open the new form for responses and
+    // grant link access (API forms are unpublished and not link-accessible by
+    // default since 2026-03-31).
     if (exam.status === "PUBLISHED") {
       await setFormAcceptingResponses({
         accessToken,
         formId: form.formId,
         accepting: true,
       });
+      await grantPublishedReaderAccess({ accessToken, formId: form.formId });
     }
     revalidatePath(`/teacher/exams/${examId}`);
     return { ok: true, url: form.responderUri };

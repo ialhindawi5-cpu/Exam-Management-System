@@ -14,14 +14,21 @@ const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 // Scopes: identify the account (email) + create/edit Forms (incl. quiz settings
 // and per-question grading) + read the responses students submit so the teacher
-// can review answers in-app. forms.body owns the forms in the teacher's Drive;
+// can review answers in-app + grant "anyone with the link" reader access to a
+// published form so students can open it (drive.file, scoped to forms this app
+// creates). forms.body owns the forms in the teacher's Drive;
 // forms.responses.readonly grants read access to their submissions.
 export const GOOGLE_SCOPES = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/forms.body",
   "https://www.googleapis.com/auth/forms.responses.readonly",
+  "https://www.googleapis.com/auth/drive.file",
 ];
+
+// Scope substrings used to detect whether a connected account granted a given
+// capability (older connections predate newer scopes and must reconnect).
+export const DRIVE_FILE_SCOPE = "drive.file";
 
 export function googleConfigured(): boolean {
   return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);

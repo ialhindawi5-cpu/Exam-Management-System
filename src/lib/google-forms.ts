@@ -10,6 +10,7 @@ import type { QuestionType } from "@prisma/client";
 // are graded manually by the teacher in Google Forms.
 
 const FORMS_API = "https://forms.googleapis.com/v1";
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
 
 export type FormQuestionInput = {
   type: QuestionType;
@@ -326,6 +327,37 @@ export async function setFormAcceptingResponses(opts: {
     return true;
   } catch (e) {
     console.error("setPublishSettings failed (legacy form?):", e);
+    return false;
+  }
+}
+
+// Give "anyone with the link" reader access to a form's published view, so
+// students can open and submit it. Under the 2026 publish model, API-created
+// forms aren't link-accessible by default — publishing alone isn't enough. Uses
+// Drive's permissions.create (scope drive.file). Non-throwing: returns false if
+// the scope is missing or the call fails, so the caller can prompt a reconnect.
+export async function grantPublishedReaderAccess(opts: {
+  accessToken: string;
+  formId: string;
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${DRIVE_API}/files/${opts.formId}/permissions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${opts.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ type: "anyone", view: "published", role: "reader" }),
+    });
+    if (!res.ok) {
+      console.error(
+        `Drive permissions.create failed (${res.status}): ${await res.text()}`,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Drive permissions.create failed:", e);
     return false;
   }
 }

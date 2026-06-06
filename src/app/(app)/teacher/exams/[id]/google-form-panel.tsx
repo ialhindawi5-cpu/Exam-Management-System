@@ -23,6 +23,7 @@ export function GoogleFormPanel({
   questionCount,
   googleConfigured,
   connected,
+  needsDriveScope,
   googleEmail,
   form,
   notice,
@@ -32,6 +33,7 @@ export function GoogleFormPanel({
   questionCount: number;
   googleConfigured: boolean;
   connected: boolean;
+  needsDriveScope: boolean;
   googleEmail: string | null;
   form: GoogleFormInfo;
   notice: "connected" | "error" | null;
@@ -116,6 +118,19 @@ export function GoogleFormPanel({
               </span>
               .
             </p>
+
+            {needsDriveScope && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Reconnect your Google account to grant the new permission that
+                lets students open the form link. Without it, a published form
+                may not be accessible to students.
+                <div className="mt-2">
+                  <a href={connectHref}>
+                    <Button variant="secondary">Reconnect Google account</Button>
+                  </a>
+                </div>
+              </div>
+            )}
 
             {!form ? (
               <div className="space-y-2">
