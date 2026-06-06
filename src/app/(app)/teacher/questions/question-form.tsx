@@ -62,6 +62,8 @@ export function QuestionForm({
   // Choice-based types share one options editor; checkboxes allow many correct.
   const isMulti = type === "CHECKBOX";
   const isChoice = type === "MCQ" || type === "DROPDOWN" || type === "CHECKBOX";
+  // Informational text: no answer, no points, not required.
+  const isText = type === "TEXT";
 
   function updateOption(i: number, value: string) {
     setOptions((prev) => prev.map((o, idx) => (idx === i ? value : o)));
@@ -173,7 +175,9 @@ export function QuestionForm({
           </div>
 
           <div>
-            <Label htmlFor="text">Question text</Label>
+            <Label htmlFor="text">
+              {isText ? "Text / instructions" : "Question text"}
+            </Label>
             <Textarea id="text" name="text" rows={3} defaultValue={defaults.text} required />
           </div>
 
@@ -182,29 +186,38 @@ export function QuestionForm({
             <ImageUpload name="imageUrl" initial={defaults.imageUrl} label="Image" />
           </div>
 
-          <div className="flex items-end gap-6">
-            <div className="w-40">
-              <Label htmlFor="points">Points</Label>
-              <Input
-                id="points"
-                name="points"
-                type="number"
-                min="0"
-                step="0.5"
-                defaultValue={defaults.points}
-                required
-              />
+          {!isText && (
+            <div className="flex items-end gap-6">
+              <div className="w-40">
+                <Label htmlFor="points">Points</Label>
+                <Input
+                  id="points"
+                  name="points"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  defaultValue={defaults.points}
+                  required
+                />
+              </div>
+              <label className="flex items-center gap-2 pb-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="required"
+                  defaultChecked={defaults.required}
+                  className="h-4 w-4"
+                />
+                Required (students must answer)
+              </label>
             </div>
-            <label className="flex items-center gap-2 pb-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                name="required"
-                defaultChecked={defaults.required}
-                className="h-4 w-4"
-              />
-              Required (students must answer)
-            </label>
-          </div>
+          )}
+
+          {isText && (
+            <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              This is an informational text block — it shows on the Google Form
+              with no answer field, no points, and isn&apos;t graded.
+            </p>
+          )}
 
           {isChoice && (
             <div>

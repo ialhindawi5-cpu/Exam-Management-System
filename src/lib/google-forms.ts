@@ -20,6 +20,7 @@ export type FormQuestionInput = {
   points: number;
   required: boolean;
   language: string;
+  imageUrl: string | null; // public URL of the question's image, or null
 };
 
 export type CreatedForm = {
@@ -101,15 +102,33 @@ function questionBody(q: FormQuestionInput): Record<string, unknown> {
 }
 
 function createItemRequests(questions: FormQuestionInput[], startIndex = 0) {
-  return questions.map((q, i) => ({
-    createItem: {
-      item: {
-        title: singleLine(`${i + 1}. ${q.text}`),
-        questionItem: { question: questionBody(q) },
+  let qNum = 0; // number only real questions, skipping text/instruction blocks
+  return questions.map((q, i) => {
+    const location = { index: startIndex + i };
+
+    // Informational text → a "title/description" item with no answer field.
+    if (q.type === "TEXT") {
+      return {
+        createItem: {
+          item: { title: singleLine(q.text), textItem: {} },
+          location,
+        },
+      };
+    }
+
+    qNum += 1;
+    const questionItem: Record<string, unknown> = { question: questionBody(q) };
+    // Attach the question's image (Google fetches sourceUri server-side).
+    if (q.imageUrl) {
+      questionItem.image = { sourceUri: q.imageUrl, altText: "Question image" };
+    }
+    return {
+      createItem: {
+        item: { title: singleLine(`${qNum}. ${q.text}`), questionItem },
+        location,
       },
-      location: { index: startIndex + i },
-    },
-  }));
+    };
+  });
 }
 
 // An imageItem request that brands the form with the school's logo at the very
@@ -480,9 +499,28 @@ export async function releaseAnswerKey(opts: {
   formId: string;
   questions: FormQuestionInput[];
 }): Promise<void> {
-  const requests: Record<string, unknown>[] = [];
+  // Map each real question to its actual position in the form. Items like the
+  // school logo (imageItem) and text/instruction blocks (textItem) have no
+  // questionItem and shift positions, so we target grading by the real
+  // question-item indices rather than assuming question N is at form index N.
+  const form = await formsFetch<{ items?: { questionItem?: unknown }[] }>(
+    opts.accessToken,
+    `/forms/${opts.formId}`,
+  );
+  const questionPositions: number[] = [];
+  (form.items ?? []).forEach((item, idx) => {
+    if (item.questionItem) questionPositions.push(idx);
+  });
 
-  opts.questions.forEach((q, index) => {
+  const requests: Record<string, unknown>[] = [];
+  let qi = 0; // index into questionPositions, over real (non-text) questions
+
+  for (const q of opts.questions) {
+    if (q.type === "TEXT") continue; // not a question on the form
+    const index = questionPositions[qi];
+    qi += 1;
+    if (index === undefined) continue; // form has fewer questions than expected
+
     // Google quiz point values are whole numbers.
     const pointValue = Math.max(0, Math.round(q.points));
     const grading: Record<string, unknown> = { pointValue };
@@ -506,7 +544,7 @@ export async function releaseAnswerKey(opts: {
         updateMask: "questionItem.question.grading",
       },
     });
-  });
+  }
 
   if (requests.length === 0) return;
 

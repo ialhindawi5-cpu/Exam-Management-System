@@ -54,16 +54,22 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
   const subjectId = (formData.get("subjectId") as string) || null;
   const language = (formData.get("language") as string) || "en";
   const text = String(formData.get("text") ?? "").trim();
-  const points = Number(formData.get("points") ?? 1);
+  // Informational text blocks carry no points.
+  const points =
+    type === "TEXT" ? 0 : Number(formData.get("points") ?? 1);
 
   if (
-    !["MCQ", "CHECKBOX", "DROPDOWN", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY"].includes(
+    !["MCQ", "CHECKBOX", "DROPDOWN", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY", "TEXT"].includes(
       type,
     )
   ) {
     return { error: "Invalid question type." };
   }
-  if (!text) return { error: "Question text is required." };
+  if (!text) {
+    return {
+      error: type === "TEXT" ? "Enter the text to display." : "Question text is required.",
+    };
+  }
   if (!Number.isFinite(points) || points < 0) {
     return { error: "Points must be zero or a positive number." };
   }
@@ -117,12 +123,13 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
       return { error: "Select True or False as the correct answer." };
     }
     correctAnswer = v;
-  } else {
-    // SHORT_ANSWER / ESSAY — model answer optional but recommended for AI grading;
-    // optional keyword rubric used to grade the answer in-app.
+  } else if (type === "SHORT_ANSWER" || type === "ESSAY") {
+    // Model answer optional but recommended for AI grading; optional keyword
+    // rubric used to grade the answer in-app.
     modelAnswer = String(formData.get("modelAnswer") ?? "").trim() || null;
     keywords = parseKeywords(formData.get("keywords"));
   }
+  // TEXT: no options, answer, model answer, or keywords — just the text.
 
   return {
     data: {

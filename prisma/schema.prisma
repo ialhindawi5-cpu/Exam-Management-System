@@ -36,6 +36,7 @@ enum QuestionType {
   TRUE_FALSE
   SHORT_ANSWER
   ESSAY // long / paragraph answer
+  TEXT // informational text / instructions — no answer, no points
 }
 
 enum Difficulty {

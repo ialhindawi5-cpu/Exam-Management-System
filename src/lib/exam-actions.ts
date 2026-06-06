@@ -135,6 +135,7 @@ async function loadFormQuestions(examId: string): Promise<FormQuestionInput[]> {
     orderBy: { order: "asc" },
     include: { question: true },
   });
+  const base = appBaseUrl();
   return eqs.map((eq) => {
     const opts = eq.question.options;
     return {
@@ -145,6 +146,12 @@ async function loadFormQuestions(examId: string): Promise<FormQuestionInput[]> {
       points: eq.points ?? eq.question.points,
       required: eq.question.required,
       language: eq.question.language,
+      // Public URL Google can fetch (data-URL images aren't usable directly).
+      // Null on local dev when there's no public base URL — image just omitted.
+      imageUrl:
+        eq.question.imageUrl && base
+          ? `${base}/api/questions/${eq.question.id}/image`
+          : null,
     };
   });
 }
@@ -733,8 +740,12 @@ export async function getExamResponses(
       orderBy: { order: "asc" },
       include: { question: true },
     });
+    // The form's question list excludes text/instruction blocks (they have no
+    // answer), so align it to the gradable DB questions only — otherwise TEXT
+    // rows would shift the positions and mis-pair questions with their rubric.
+    const gradable = examQuestions.filter((eq) => eq.question.type !== "TEXT");
     const questions: ExamResponseQuestion[] = form.questions.map((fq) => {
-      const eq = examQuestions[fq.index];
+      const eq = gradable[fq.index];
       return {
         index: fq.index,
         title: fq.title,
@@ -780,7 +791,10 @@ export async function gradeOpenAnswerAction(
     orderBy: { order: "asc" },
     include: { question: true },
   });
-  const eq = examQuestions[questionIndex];
+  // questionIndex comes from the responses panel, whose indices are dense over
+  // gradable questions (text/instruction blocks are excluded) — match that.
+  const gradable = examQuestions.filter((eq) => eq.question.type !== "TEXT");
+  const eq = gradable[questionIndex];
   if (!eq) return { error: "Question not found." };
 
   const q = eq.question;
