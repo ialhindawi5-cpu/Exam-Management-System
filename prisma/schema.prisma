@@ -198,6 +198,10 @@ model Exam {
   // Form) at this time. Cleared once it fires or the teacher publishes manually.
   scheduledPublishAt DateTime?
 
+  // When set, a scheduled job auto-closes the exam (marks the Google Form
+  // closed) at this time. Cleared once it fires or the teacher closes manually.
+  scheduledCloseAt DateTime?
+
   subjectId String?
   subject   Subject? @relation(fields: [subjectId], references: [id])
 

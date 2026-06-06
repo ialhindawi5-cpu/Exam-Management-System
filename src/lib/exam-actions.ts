@@ -369,12 +369,14 @@ export async function setExamStatus(examId: string, status: ExamStatus) {
 
   await applyExamStatus(exam, teacher.id, status);
 
-  // A manual status change overrides any pending scheduled publish.
-  if (exam.scheduledPublishAt) {
-    await prisma.exam.update({
-      where: { id: examId },
-      data: { scheduledPublishAt: null },
-    });
+  // A manual status change overrides pending schedules: clear the publish
+  // schedule once it's no longer a draft, and the close schedule once it's no
+  // longer published.
+  const clear: Prisma.ExamUpdateInput = {};
+  if (status !== "DRAFT" && exam.scheduledPublishAt) clear.scheduledPublishAt = null;
+  if (status !== "PUBLISHED" && exam.scheduledCloseAt) clear.scheduledCloseAt = null;
+  if (Object.keys(clear).length > 0) {
+    await prisma.exam.update({ where: { id: examId }, data: clear });
   }
 
   revalidatePath(`/teacher/exams/${examId}`);
@@ -422,6 +424,85 @@ export async function scheduleExamPublish(
   });
   revalidatePath(`/teacher/exams/${examId}`);
   return { ok: true, scheduledFor: when.toISOString() };
+}
+
+// Schedule (or, with `whenIso === null`, cancel) automatic closing of an exam.
+// The actual close is performed later by the cron job (closeDueExams).
+export async function scheduleExamClose(
+  examId: string,
+  whenIso: string | null,
+): Promise<{ ok: true; scheduledFor: string | null } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+
+  if (whenIso === null) {
+    await prisma.exam.update({
+      where: { id: examId },
+      data: { scheduledCloseAt: null },
+    });
+    revalidatePath(`/teacher/exams/${examId}`);
+    return { ok: true, scheduledFor: null };
+  }
+
+  if (exam.status === "CLOSED") {
+    return { error: "This exam is already closed." };
+  }
+  const when = new Date(whenIso);
+  if (Number.isNaN(when.getTime())) {
+    return { error: "Choose a valid date and time." };
+  }
+  if (when.getTime() <= Date.now()) {
+    return { error: "Pick a time in the future." };
+  }
+  // If a publish is also scheduled, the close must come after it.
+  if (exam.scheduledPublishAt && when.getTime() <= exam.scheduledPublishAt.getTime()) {
+    return { error: "The close time must be after the scheduled publish time." };
+  }
+
+  await prisma.exam.update({
+    where: { id: examId },
+    data: { scheduledCloseAt: when },
+  });
+  revalidatePath(`/teacher/exams/${examId}`);
+  return { ok: true, scheduledFor: when.toISOString() };
+}
+
+export type CloseDueResult =
+  | { closed: number; failed: number }
+  | { error: string };
+
+// Close every published exam whose scheduled close time has arrived. Invoked by
+// the cron route alongside publishDueExams; guarded by CRON_SECRET.
+export async function closeDueExams(secret: string): Promise<CloseDueResult> {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || secret !== expected) return { error: "unauthorized" };
+
+  const due = await prisma.exam.findMany({
+    where: {
+      status: "PUBLISHED",
+      scheduledCloseAt: { not: null, lte: new Date() },
+    },
+  });
+
+  let closed = 0;
+  let failed = 0;
+  for (const exam of due) {
+    try {
+      await applyExamStatus(exam, exam.createdById, "CLOSED");
+      await prisma.exam.update({
+        where: { id: exam.id },
+        data: { scheduledCloseAt: null },
+      });
+      closed += 1;
+      revalidatePath(`/teacher/exams/${exam.id}`);
+    } catch (e) {
+      console.error(`Scheduled close failed for exam ${exam.id}:`, e);
+      failed += 1;
+    }
+  }
+  if (closed > 0) revalidatePath("/teacher/exams");
+  return { closed, failed };
 }
 
 export type PublishDueResult =

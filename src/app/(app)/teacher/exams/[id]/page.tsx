@@ -129,11 +129,13 @@ export default async function ExamBuilderPage({
         />
       </div>
 
-      {exam.status !== "PUBLISHED" && (
+      {exam.status !== "CLOSED" && (
         <div className="mb-6">
           <SchedulePublish
             examId={exam.id}
-            scheduledFor={exam.scheduledPublishAt?.toISOString() ?? null}
+            status={exam.status}
+            scheduledPublishFor={exam.scheduledPublishAt?.toISOString() ?? null}
+            scheduledCloseFor={exam.scheduledCloseAt?.toISOString() ?? null}
             questionCount={exam.examQuestions.length}
             googleReady={googleConfigured() && Boolean(googleAccount)}
           />
