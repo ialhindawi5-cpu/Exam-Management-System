@@ -651,6 +651,20 @@ export async function createOrSyncGoogleForm(
         where: { id: examId },
         data: { answerKeyReleasedAt: null },
       });
+      // Reconcile the form's open/closed state to the exam's status, so a
+      // re-sync reliably opens a published exam's form (and grants link access).
+      await setFormAcceptingResponses({
+        accessToken,
+        formId: exam.googleFormId,
+        accepting: exam.status === "PUBLISHED",
+        published: exam.status !== "DRAFT",
+      });
+      if (exam.status === "PUBLISHED") {
+        await grantPublishedReaderAccess({
+          accessToken,
+          formId: exam.googleFormId,
+        });
+      }
       revalidatePath(`/teacher/exams/${examId}`);
       return { ok: true, url: exam.googleFormUrl };
     }
