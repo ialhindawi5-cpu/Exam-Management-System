@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/publish-exams",
-      "schedule": "* * * * *"
+      "schedule": "0 5 * * *"
     }
   ]
 }
