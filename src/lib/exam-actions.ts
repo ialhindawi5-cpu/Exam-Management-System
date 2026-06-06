@@ -366,6 +366,9 @@ async function applyExamStatus(
         accessToken,
         formId: exam.googleFormId,
         accepting: status === "PUBLISHED",
+        // DRAFT fully unpublishes; CLOSED stays published-but-closed (visible
+        // with a closed notice) so students see the exam is over.
+        published: status !== "DRAFT",
       });
       if (status === "PUBLISHED") {
         await grantPublishedReaderAccess({

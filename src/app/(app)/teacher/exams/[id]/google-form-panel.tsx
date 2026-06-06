@@ -23,6 +23,7 @@ export function GoogleFormPanel({
   questionCount,
   googleConfigured,
   connected,
+  needsFormsScope,
   needsDriveScope,
   googleEmail,
   form,
@@ -33,6 +34,7 @@ export function GoogleFormPanel({
   questionCount: number;
   googleConfigured: boolean;
   connected: boolean;
+  needsFormsScope: boolean;
   needsDriveScope: boolean;
   googleEmail: string | null;
   form: GoogleFormInfo;
@@ -119,17 +121,34 @@ export function GoogleFormPanel({
               .
             </p>
 
-            {needsDriveScope && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                Reconnect your Google account to grant the new permission that
-                lets students open the form link. Without it, a published form
-                may not be accessible to students.
+            {needsFormsScope ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                Your Google connection is missing the <strong>Forms</strong>{" "}
+                permission, so creating or syncing the form will fail with a
+                “permission denied” error. Reconnect and make sure you{" "}
+                <strong>tick every permission</strong> Google asks for
+                (especially “See, edit, create and delete all your Google
+                Forms”). Connect the same Google account that owns the form.
                 <div className="mt-2">
                   <a href={connectHref}>
                     <Button variant="secondary">Reconnect Google account</Button>
                   </a>
                 </div>
               </div>
+            ) : (
+              needsDriveScope && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Reconnect your Google account to grant the new permission that
+                  lets students open the form link. Without it, a published form
+                  may not be accessible to students. When reconnecting, tick
+                  every permission Google asks for.
+                  <div className="mt-2">
+                    <a href={connectHref}>
+                      <Button variant="secondary">Reconnect Google account</Button>
+                    </a>
+                  </div>
+                </div>
+              )
             )}
 
             {!form ? (

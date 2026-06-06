@@ -149,6 +149,10 @@ export default async function ExamBuilderPage({
           questionCount={exam.examQuestions.length}
           googleConfigured={googleConfigured()}
           connected={Boolean(googleAccount)}
+          needsFormsScope={
+            Boolean(googleAccount) &&
+            !googleAccount?.scope?.includes("forms.body")
+          }
           needsDriveScope={
             Boolean(googleAccount) &&
             !googleAccount?.scope?.includes("drive.file")

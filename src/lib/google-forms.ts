@@ -332,13 +332,17 @@ export async function setFormAcceptingResponses(opts: {
   accessToken: string;
   formId: string;
   accepting: boolean;
+  // Whether the form is published (visible) at all. Defaults to true. Pass false
+  // to fully unpublish (draft) rather than leaving it "published but closed".
+  published?: boolean;
 }): Promise<boolean> {
+  const isPublished = opts.published ?? true;
   try {
     await formsFetch(opts.accessToken, `/forms/${opts.formId}:setPublishSettings`, {
       method: "POST",
       body: JSON.stringify({
         publishSettings: {
-          publishState: { isPublished: true, isAcceptingResponses: opts.accepting },
+          publishState: { isPublished, isAcceptingResponses: opts.accepting },
         },
         updateMask: "publishState",
       }),
