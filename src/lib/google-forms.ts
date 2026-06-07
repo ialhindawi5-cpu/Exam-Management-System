@@ -335,7 +335,7 @@ export async function setFormAcceptingResponses(opts: {
   // Whether the form is published (visible) at all. Defaults to true. Pass false
   // to fully unpublish (draft) rather than leaving it "published but closed".
   published?: boolean;
-}): Promise<boolean> {
+}): Promise<{ ok: boolean; error?: string }> {
   const isPublished = opts.published ?? true;
   try {
     await formsFetch(opts.accessToken, `/forms/${opts.formId}:setPublishSettings`, {
@@ -347,10 +347,11 @@ export async function setFormAcceptingResponses(opts: {
         updateMask: "publishState",
       }),
     });
-    return true;
+    return { ok: true };
   } catch (e) {
-    console.error("setPublishSettings failed (legacy form?):", e);
-    return false;
+    const error = e instanceof Error ? e.message : String(e);
+    console.error("setPublishSettings failed:", error);
+    return { ok: false, error };
   }
 }
 

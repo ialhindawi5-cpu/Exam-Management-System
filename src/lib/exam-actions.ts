@@ -653,7 +653,7 @@ export async function createOrSyncGoogleForm(
       });
       // Reconcile the form's open/closed state to the exam's status, so a
       // re-sync reliably opens a published exam's form (and grants link access).
-      await setFormAcceptingResponses({
+      const pub = await setFormAcceptingResponses({
         accessToken,
         formId: exam.googleFormId,
         accepting: exam.status === "PUBLISHED",
@@ -666,6 +666,11 @@ export async function createOrSyncGoogleForm(
         });
       }
       revalidatePath(`/teacher/exams/${examId}`);
+      if (exam.status === "PUBLISHED" && !pub.ok) {
+        return {
+          error: `Form synced, but couldn't open it for responses: ${pub.error ?? "unknown error"}`,
+        };
+      }
       return { ok: true, url: exam.googleFormUrl };
     }
 
@@ -691,12 +696,18 @@ export async function createOrSyncGoogleForm(
     // grant link access (API forms are unpublished and not link-accessible by
     // default since 2026-03-31).
     if (exam.status === "PUBLISHED") {
-      await setFormAcceptingResponses({
+      const pub = await setFormAcceptingResponses({
         accessToken,
         formId: form.formId,
         accepting: true,
       });
       await grantPublishedReaderAccess({ accessToken, formId: form.formId });
+      if (!pub.ok) {
+        revalidatePath(`/teacher/exams/${examId}`);
+        return {
+          error: `Form created, but couldn't open it for responses: ${pub.error ?? "unknown error"}`,
+        };
+      }
     }
     revalidatePath(`/teacher/exams/${examId}`);
     return { ok: true, url: form.responderUri };
