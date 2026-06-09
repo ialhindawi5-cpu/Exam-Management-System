@@ -7,40 +7,50 @@ import { cn } from "@/components/ui";
 
 export type NavItem = { href: string; label: string };
 
-export function NavLinks({
+function useIsActive() {
+  const pathname = usePathname();
+  return (href: string) =>
+    pathname === href || pathname.startsWith(href + "/");
+}
+
+// Desktop: inline nav links (hidden on mobile). Sits next to the brand.
+export function NavLinksDesktop({ items }: { items: NavItem[] }) {
+  const isActive = useIsActive();
+  return (
+    <nav className="hidden items-center gap-1 lg:flex">
+      {items.map((item) => (
+        <Link
+          key={item.href}
+          href={item.href}
+          className={cn(
+            "rounded-lg px-3 py-1.5 text-sm font-medium transition",
+            isActive(item.href)
+              ? "bg-blue-50 text-brand"
+              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+          )}
+        >
+          {item.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+// Mobile: hamburger button + dropdown (hidden on desktop). Place the component
+// wherever the button should sit; the dropdown spans the full header width.
+export function NavMenuButton({
   items,
   trailing,
 }: {
   items: NavItem[];
-  // Rendered at the bottom of the mobile dropdown (e.g. the Log out button).
+  // Rendered at the bottom of the dropdown (e.g. the Log out button).
   trailing?: React.ReactNode;
 }) {
-  const pathname = usePathname();
+  const isActive = useIsActive();
   const [open, setOpen] = useState(false);
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(href + "/");
 
   return (
     <>
-      {/* Desktop: inline links */}
-      <nav className="hidden items-center gap-1 lg:flex">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-sm font-medium transition",
-              isActive(item.href)
-                ? "bg-blue-50 text-brand"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
-            )}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-
-      {/* Mobile: hamburger toggle */}
       <button
         type="button"
         aria-label="Toggle menu"
@@ -63,7 +73,7 @@ export function NavLinks({
         </svg>
       </button>
 
-      {/* Mobile: dropdown panel — positioned against the sticky header */}
+      {/* Dropdown panel — positioned against the sticky header, full width. */}
       {open && (
         <>
           {/* click-away backdrop */}

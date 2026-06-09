@@ -1,4 +1,4 @@
-import { NavLinks, type NavItem } from "@/components/nav-links";
+import { NavLinksDesktop, NavMenuButton, type NavItem } from "@/components/nav-links";
 import { LogoutButton } from "@/components/logout-button";
 import { Badge } from "@/components/ui";
 import { ChatWidget } from "@/components/assistant/chat-widget";
@@ -42,11 +42,8 @@ export async function AppShell({
               )}
               <span className="truncate">{schoolName || "Exam System"}</span>
             </span>
-            {/* On mobile the hamburger dropdown also carries Log out. */}
-            <NavLinks
-              items={nav}
-              trailing={<LogoutButton variant="ghost" className="w-full" />}
-            />
+            {/* Desktop: inline nav links next to the brand. */}
+            <NavLinksDesktop items={nav} />
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <div className="hidden text-right sm:block">
@@ -54,10 +51,15 @@ export async function AppShell({
               <div className="text-xs text-gray-500">{user.email}</div>
             </div>
             <Badge color={roleColor[user.role]}>{user.role}</Badge>
-            {/* Header Log out is desktop-only; mobile uses the menu (above). */}
+            {/* Header Log out is desktop-only; mobile uses the menu button. */}
             <div className="hidden lg:block">
               <LogoutButton variant="ghost" />
             </div>
+            {/* Mobile: menu button on the right; its dropdown carries Log out. */}
+            <NavMenuButton
+              items={nav}
+              trailing={<LogoutButton variant="ghost" className="w-full" />}
+            />
           </div>
         </div>
       </header>
