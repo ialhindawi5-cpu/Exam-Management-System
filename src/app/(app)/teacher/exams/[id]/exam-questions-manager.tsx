@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import {
   addQuestion,
   removeQuestion,
   autoFillByDifficulty,
+  reorderExamQuestions,
 } from "@/lib/exam-actions";
 import {
   Button,
@@ -52,6 +53,27 @@ export function ExamQuestionsManager({
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  // Local copy of the ordered questions for instant drag-and-drop feedback.
+  // Re-synced when the server sends a fresh list (after any mutation) by
+  // adjusting state during render — the recommended pattern over an effect.
+  const [items, setItems] = useState<QuestionLite[]>(current);
+  const [syncedFrom, setSyncedFrom] = useState(current);
+  if (syncedFrom !== current) {
+    setSyncedFrom(current);
+    setItems(current);
+  }
+  const dragFrom = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  function reorder(from: number, to: number) {
+    if (from === to) return;
+    const next = items.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setItems(next);
+    run(() => reorderExamQuestions(examId, next.map((q) => q.id)));
+  }
+
   // Auto-fill inputs
   const [easy, setEasy] = useState(0);
   const [medium, setMedium] = useState(0);
@@ -59,8 +81,8 @@ export function ExamQuestionsManager({
   const [subjectId, setSubjectId] = useState("");
 
   const totalPoints = useMemo(
-    () => current.reduce((sum, q) => sum + q.points, 0),
-    [current],
+    () => items.reduce((sum, q) => sum + q.points, 0),
+    [items],
   );
 
   const filtered = useMemo(() => {
@@ -82,7 +104,7 @@ export function ExamQuestionsManager({
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-semibold text-gray-900">
-            Exam questions ({current.length})
+            Exam questions ({items.length})
           </h3>
           <span className="text-sm text-gray-500">
             {totalPoints} raw points
@@ -93,45 +115,81 @@ export function ExamQuestionsManager({
             {error}
           </p>
         )}
-        {current.length === 0 ? (
+        {items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
             No questions yet. Add from your bank or auto-fill by difficulty.
           </div>
         ) : (
-          <ol className="space-y-2">
-            {current.map((q, i) => (
-              <li
-                key={q.id}
-                className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3"
-              >
-                <div className="min-w-0">
-                  <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-400">
-                      {i + 1}.
-                    </span>
-                    <Badge color="blue">{QUESTION_TYPE_LABELS[q.type]}</Badge>
-                    <Badge color={diffColor[q.difficulty]}>
-                      {DIFFICULTY_LABELS[q.difficulty]}
-                    </Badge>
-                    <span className="text-xs text-gray-400">{q.points} pt</span>
-                  </div>
-                  <p
-                    className="text-sm text-gray-800"
-                    dir={q.language === "ar" ? "rtl" : "ltr"}
-                  >
-                    {q.text}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  disabled={pending}
-                  onClick={() => run(() => removeQuestion(examId, q.id))}
+          <>
+            <p className="mb-2 text-xs text-gray-400">
+              Drag the ⠿ handle to reorder questions.
+            </p>
+            <ol className="space-y-2">
+              {items.map((q, i) => (
+                <li
+                  key={q.id}
+                  draggable
+                  onDragStart={(e) => {
+                    dragFrom.current = i;
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (dragOver !== i) setDragOver(i);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragFrom.current !== null) reorder(dragFrom.current, i);
+                    dragFrom.current = null;
+                    setDragOver(null);
+                  }}
+                  onDragEnd={() => {
+                    dragFrom.current = null;
+                    setDragOver(null);
+                  }}
+                  className={[
+                    "flex items-start justify-between gap-3 rounded-xl border bg-white p-3",
+                    dragOver === i ? "border-brand ring-2 ring-blue-200" : "border-gray-200",
+                  ].join(" ")}
                 >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ol>
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span
+                      className="mt-0.5 cursor-grab select-none text-gray-300 hover:text-gray-500"
+                      aria-hidden="true"
+                      title="Drag to reorder"
+                    >
+                      ⠿
+                    </span>
+                    <div className="min-w-0">
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-400">
+                          {i + 1}.
+                        </span>
+                        <Badge color="blue">{QUESTION_TYPE_LABELS[q.type]}</Badge>
+                        <Badge color={diffColor[q.difficulty]}>
+                          {DIFFICULTY_LABELS[q.difficulty]}
+                        </Badge>
+                        <span className="text-xs text-gray-400">{q.points} pt</span>
+                      </div>
+                      <p
+                        className="text-sm text-gray-800"
+                        dir={q.language === "ar" ? "rtl" : "ltr"}
+                      >
+                        {q.text}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => run(() => removeQuestion(examId, q.id))}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ol>
+          </>
         )}
       </div>
 

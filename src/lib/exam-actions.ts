@@ -233,6 +233,29 @@ export async function addQuestion(examId: string, questionId: string) {
   return { ok: true };
 }
 
+// Persist a new question order for the exam. `orderedQuestionIds` is the full
+// list of the exam's question ids in their new sequence. The new order flows
+// to the Google Form on the next sync/publish.
+export async function reorderExamQuestions(
+  examId: string,
+  orderedQuestionIds: string[],
+): Promise<{ ok: true } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+
+  await prisma.$transaction(
+    orderedQuestionIds.map((questionId, index) =>
+      prisma.examQuestion.updateMany({
+        where: { examId, questionId },
+        data: { order: index + 1 },
+      }),
+    ),
+  );
+  revalidatePath(`/teacher/exams/${examId}`);
+  return { ok: true };
+}
+
 export async function removeQuestion(examId: string, questionId: string) {
   const teacher = await requireRole("TEACHER");
   const exam = await ownedExam(examId, teacher.id);
