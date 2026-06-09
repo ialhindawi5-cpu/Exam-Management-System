@@ -50,12 +50,20 @@ export type ExamResponsesResult =
   | { error: string; needsReconnect?: boolean };
 
 // Public origin where this app is reachable. Used to build URLs that Google's
-// servers must fetch — e.g. the school logo embedded into a generated form.
-// Returns null when neither is set (typical local dev), in which case external
-// fetchers can't reach us and the logo is simply skipped.
+// servers must fetch — e.g. question images and the school logo embedded into a
+// generated form. Returns null when none is set (typical local dev), in which
+// case external fetchers can't reach us and the image/logo is simply skipped.
+//
+// Prefer an explicit NEXT_PUBLIC_APP_URL, then Vercel's STABLE production domain
+// (VERCEL_PROJECT_PRODUCTION_URL), and only fall back to the per-deployment
+// VERCEL_URL — the latter changes every deploy and is often unreachable to
+// Google (deployment protection), which would silently drop embedded images.
 function appBaseUrl(): string | null {
   if (process.env.NEXT_PUBLIC_APP_URL) {
     return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   }
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return null;
