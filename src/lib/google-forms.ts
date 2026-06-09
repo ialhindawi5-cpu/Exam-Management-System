@@ -106,14 +106,17 @@ function createItemRequests(questions: FormQuestionInput[], startIndex = 0) {
   return questions.map((q, i) => {
     const location = { index: startIndex + i };
 
-    // Informational text → a "title/description" item with no answer field.
+    // Informational block with no answer field. With a picture → an imageItem
+    // (the text becomes the caption shown above the image); otherwise a plain
+    // text/instructions item.
     if (q.type === "TEXT") {
-      return {
-        createItem: {
-          item: { title: singleLine(q.text), textItem: {} },
-          location,
-        },
-      };
+      const item = q.imageUrl
+        ? {
+            ...(q.text ? { title: singleLine(q.text) } : {}),
+            imageItem: { image: { sourceUri: q.imageUrl, altText: "Image" } },
+          }
+        : { title: singleLine(q.text), textItem: {} };
+      return { createItem: { item, location } };
     }
 
     qNum += 1;

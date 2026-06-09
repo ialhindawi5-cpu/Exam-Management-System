@@ -182,7 +182,11 @@ export function QuestionForm({
           </div>
 
           <div>
-            <Label>Question image (optional)</Label>
+            <Label>
+              {isText
+                ? "Picture (optional) — shown as an image on the form"
+                : "Question image (optional)"}
+            </Label>
             <ImageUpload name="imageUrl" initial={defaults.imageUrl} label="Image" />
           </div>
 
@@ -214,8 +218,9 @@ export function QuestionForm({
 
           {isText && (
             <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
-              This is an informational text block — it shows on the Google Form
-              with no answer field, no points, and isn&apos;t graded.
+              This is an informational block — it shows on the Google Form with
+              no answer field, no points, and isn&apos;t graded. Add a picture
+              above to display it as an image (with the text as its caption).
             </p>
           )}
 
