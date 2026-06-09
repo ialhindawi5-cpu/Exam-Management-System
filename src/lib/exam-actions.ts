@@ -22,6 +22,7 @@ import {
   type ExamResponse,
 } from "@/lib/google-forms";
 import { gradeOpenAnswer, aiEnabled, aiUnavailableReason } from "@/lib/ai";
+import { isContentType } from "@/lib/labels";
 import type {
   Difficulty,
   Exam,
@@ -823,10 +824,12 @@ export async function getExamResponses(
       orderBy: { order: "asc" },
       include: { question: true },
     });
-    // The form's question list excludes text/instruction blocks (they have no
-    // answer), so align it to the gradable DB questions only — otherwise TEXT
-    // rows would shift the positions and mis-pair questions with their rubric.
-    const gradable = examQuestions.filter((eq) => eq.question.type !== "TEXT");
+    // The form's question list excludes content blocks (text/image — they have
+    // no answer), so align it to the gradable DB questions only — otherwise they
+    // would shift positions and mis-pair questions with their rubric.
+    const gradable = examQuestions.filter(
+      (eq) => !isContentType(eq.question.type),
+    );
     const questions: ExamResponseQuestion[] = form.questions.map((fq) => {
       const eq = gradable[fq.index];
       return {
@@ -875,8 +878,10 @@ export async function gradeOpenAnswerAction(
     include: { question: true },
   });
   // questionIndex comes from the responses panel, whose indices are dense over
-  // gradable questions (text/instruction blocks are excluded) — match that.
-  const gradable = examQuestions.filter((eq) => eq.question.type !== "TEXT");
+  // gradable questions (content blocks are excluded) — match that.
+  const gradable = examQuestions.filter(
+    (eq) => !isContentType(eq.question.type),
+  );
   const eq = gradable[questionIndex];
   if (!eq) return { error: "Question not found." };
 

@@ -8,6 +8,7 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   SHORT_ANSWER: "Short Answer",
   ESSAY: "Long Answer",
   TEXT: "Text / Instructions",
+  IMAGE: "Picture / Image",
 };
 
 // Whether a question type can be graded automatically with certainty.
@@ -19,7 +20,12 @@ export const IS_AUTO_GRADABLE: Record<QuestionType, boolean> = {
   SHORT_ANSWER: false, // AI-assisted suggestion only
   ESSAY: false, // AI-assisted suggestion only
   TEXT: false, // not a question — informational text only
+  IMAGE: false, // not a question — a picture only
 };
+
+// "Content" items that carry no answer and no points (informational only).
+export const CONTENT_TYPES: QuestionType[] = ["TEXT", "IMAGE"];
+export const isContentType = (t: QuestionType) => CONTENT_TYPES.includes(t);
 
 // Choice-based types whose answer is one or more of a fixed list of options.
 export const CHOICE_TYPES: QuestionType[] = ["MCQ", "CHECKBOX", "DROPDOWN"];
@@ -43,6 +49,7 @@ export const QUESTION_TYPES: QuestionType[] = [
   "SHORT_ANSWER",
   "ESSAY",
   "TEXT",
+  "IMAGE",
 ];
 
 // Types the AI generator can produce. Checkboxes/dropdown are created manually

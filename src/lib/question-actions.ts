@@ -54,18 +54,19 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
   const subjectId = (formData.get("subjectId") as string) || null;
   const language = (formData.get("language") as string) || "en";
   const text = String(formData.get("text") ?? "").trim();
-  // Informational text blocks carry no points.
-  const points =
-    type === "TEXT" ? 0 : Number(formData.get("points") ?? 1);
+  // Informational content blocks (text / image) carry no points.
+  const isContent = type === "TEXT" || type === "IMAGE";
+  const points = isContent ? 0 : Number(formData.get("points") ?? 1);
 
   if (
-    !["MCQ", "CHECKBOX", "DROPDOWN", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY", "TEXT"].includes(
+    !["MCQ", "CHECKBOX", "DROPDOWN", "TRUE_FALSE", "SHORT_ANSWER", "ESSAY", "TEXT", "IMAGE"].includes(
       type,
     )
   ) {
     return { error: "Invalid question type." };
   }
-  if (!text) {
+  // A picture item's title is optional; everything else needs text.
+  if (!text && type !== "IMAGE") {
     return {
       error: type === "TEXT" ? "Enter the text to display." : "Question text is required.",
     };
@@ -82,6 +83,9 @@ function parse(formData: FormData): { data: ParsedQuestion } | { error: string }
     if (imageUrl.length > 1_400_000) {
       return { error: "Question image is too large (max ~1 MB)." };
     }
+  }
+  if (type === "IMAGE" && !imageUrl) {
+    return { error: "Upload a picture for this item." };
   }
 
   let options: string[] | null = null;

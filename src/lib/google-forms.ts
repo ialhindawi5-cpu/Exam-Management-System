@@ -109,7 +109,7 @@ function createItemRequests(questions: FormQuestionInput[], startIndex = 0) {
     // Informational block with no answer field. With a picture → an imageItem
     // (the text becomes the caption shown above the image); otherwise a plain
     // text/instructions item.
-    if (q.type === "TEXT") {
+    if (q.type === "TEXT" || q.type === "IMAGE") {
       const item = q.imageUrl
         ? {
             ...(q.text ? { title: singleLine(q.text) } : {}),
@@ -524,7 +524,7 @@ export async function releaseAnswerKey(opts: {
   let qi = 0; // index into questionPositions, over real (non-text) questions
 
   for (const q of opts.questions) {
-    if (q.type === "TEXT") continue; // not a question on the form
+    if (q.type === "TEXT" || q.type === "IMAGE") continue; // not questions on the form
     const index = questionPositions[qi];
     qi += 1;
     if (index === undefined) continue; // form has fewer questions than expected

@@ -62,8 +62,10 @@ export function QuestionForm({
   // Choice-based types share one options editor; checkboxes allow many correct.
   const isMulti = type === "CHECKBOX";
   const isChoice = type === "MCQ" || type === "DROPDOWN" || type === "CHECKBOX";
-  // Informational text: no answer, no points, not required.
+  // Informational content: no answer, no points, not required.
   const isText = type === "TEXT";
+  const isImage = type === "IMAGE";
+  const isContent = isText || isImage;
 
   function updateOption(i: number, value: string) {
     setOptions((prev) => prev.map((o, idx) => (idx === i ? value : o)));
@@ -176,21 +178,33 @@ export function QuestionForm({
 
           <div>
             <Label htmlFor="text">
-              {isText ? "Text / instructions" : "Question text"}
+              {isText
+                ? "Text / instructions"
+                : isImage
+                  ? "Title (optional)"
+                  : "Question text"}
             </Label>
-            <Textarea id="text" name="text" rows={3} defaultValue={defaults.text} required />
+            <Textarea
+              id="text"
+              name="text"
+              rows={3}
+              defaultValue={defaults.text}
+              required={!isImage}
+            />
           </div>
 
           <div>
             <Label>
-              {isText
-                ? "Picture (optional) — shown as an image on the form"
-                : "Question image (optional)"}
+              {isImage
+                ? "Picture"
+                : isText
+                  ? "Picture (optional) — shown as an image on the form"
+                  : "Question image (optional)"}
             </Label>
             <ImageUpload name="imageUrl" initial={defaults.imageUrl} label="Image" />
           </div>
 
-          {!isText && (
+          {!isContent && (
             <div className="flex items-end gap-6">
               <div className="w-40">
                 <Label htmlFor="points">Points</Label>
@@ -221,6 +235,13 @@ export function QuestionForm({
               This is an informational block — it shows on the Google Form with
               no answer field, no points, and isn&apos;t graded. Add a picture
               above to display it as an image (with the text as its caption).
+            </p>
+          )}
+          {isImage && (
+            <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              Upload a picture above; it shows on the Google Form as an image
+              (with the title as its caption) — no answer field, no points, and
+              isn&apos;t graded.
             </p>
           )}
 

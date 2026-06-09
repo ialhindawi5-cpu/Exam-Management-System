@@ -37,6 +37,7 @@ enum QuestionType {
   SHORT_ANSWER
   ESSAY // long / paragraph answer
   TEXT // informational text / instructions — no answer, no points
+  IMAGE // a picture with an optional title — no answer, no points
 }
 
 enum Difficulty {
