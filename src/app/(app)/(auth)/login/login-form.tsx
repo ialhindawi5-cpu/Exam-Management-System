@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { login, type AuthState } from "@/lib/auth-actions";
-import { Button, Card, CardBody, Input, Label } from "@/components/ui";
+import { Button, Card, CardBody, Input, Label, Spinner } from "@/components/ui";
 
 export function LoginForm() {
   const [state, action, pending] = useActionState<AuthState, FormData>(
@@ -95,7 +95,14 @@ export function LoginForm() {
           )}
 
           <Button type="submit" disabled={pending} className="w-full">
-            {pending ? "Signing in…" : "Sign in"}
+            {pending ? (
+              <>
+                <Spinner />
+                Signing in…
+              </>
+            ) : (
+              "Sign in"
+            )}
           </Button>
         </form>
 
