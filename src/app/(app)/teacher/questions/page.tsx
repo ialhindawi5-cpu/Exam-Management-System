@@ -49,7 +49,7 @@ export default async function QuestionsPage({
         title="Question Bank"
         description="Your questions — reusable across exams."
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link href="/teacher/questions/generate">
               <Button variant="secondary">✨ Generate with AI</Button>
             </Link>
