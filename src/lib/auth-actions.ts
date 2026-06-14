@@ -7,6 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { createSession, deleteSession, getSession } from "@/lib/session";
 import { dashboardPathFor } from "@/lib/dal";
 import { rateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
+import {
+  notifyAdminsOfPendingUser,
+  notifyUserRegistrationReceived,
+} from "@/lib/email";
 
 export type AuthState = { error?: string } | undefined;
 
@@ -65,6 +69,16 @@ export async function register(
       schoolId: schoolId || null,
     },
   });
+
+  // Notify admins that someone is awaiting approval, and acknowledge to the new
+  // user that their account is pending review. Best-effort: never let an email
+  // failure break sign-up. (Must be before redirect(), which throws.)
+  try {
+    await notifyAdminsOfPendingUser({ name, email, schoolName: school.name });
+    await notifyUserRegistrationReceived({ name, email });
+  } catch (e) {
+    console.error("Registration notification emails failed:", e);
+  }
 
   // New users are PENDING until an admin approves them.
   redirect("/pending");

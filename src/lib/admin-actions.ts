@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/dal";
+import { notifyUserDecision } from "@/lib/email";
 import type { Role, AccessStatus } from "@prisma/client";
 
 // Admin resets a user's password (no email needed — for "forgot password").
@@ -25,10 +26,22 @@ export async function setAccessStatus(userId: string, status: AccessStatus) {
   if (userId === admin.id && status !== "APPROVED") {
     return { error: "You cannot change your own access status." };
   }
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: { accessStatus: status },
+    select: { name: true, email: true },
   });
+
+  // Email the user the review outcome. Best-effort — never block the action.
+  // (PENDING is the unreviewed state, so it sends no decision email.)
+  if (status === "APPROVED" || status === "SUSPENDED") {
+    try {
+      await notifyUserDecision(updated, status === "APPROVED");
+    } catch (e) {
+      console.error("Decision notification email failed:", e);
+    }
+  }
+
   revalidatePath("/admin/users");
   return { ok: true };
 }
