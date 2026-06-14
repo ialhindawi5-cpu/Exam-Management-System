@@ -88,6 +88,18 @@ model GoogleAccount {
   updatedAt    DateTime @updatedAt
 }
 
+// Durable, cross-instance counters for rate limiting / brute-force throttling on
+// sensitive endpoints (login, registration). Keyed by e.g.
+// "login:ip:1.2.3.4" or "login:email:user@x.com". Unlike an in-memory limiter,
+// this survives serverless cold starts and is shared across all instances.
+model RateLimit {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime // when the current window resets
+
+  @@index([expiresAt])
+}
+
 // Single-row app branding (used as a fallback when a user/exam has no school).
 model AppSetting {
   id          String   @id @default("singleton")

@@ -6,8 +6,13 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { createSession, deleteSession, getSession } from "@/lib/session";
 import { dashboardPathFor } from "@/lib/dal";
+import { rateLimit, clearRateLimit, clientIp } from "@/lib/rate-limit";
 
 export type AuthState = { error?: string } | undefined;
+
+// Work factor for bcrypt. 12 is the current sensible default (10 was the old
+// minimum); existing 10-round hashes still verify, so this needs no migration.
+const BCRYPT_ROUNDS = 12;
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters."),
@@ -33,6 +38,12 @@ export async function register(
 
   const { name, email, password, schoolId } = parsed.data;
 
+  // Throttle signups per IP to curb automated account-creation spam.
+  const ip = await clientIp();
+  if (!(await rateLimit(`register:${ip}`, 5, 60 * 60 * 1000)).allowed) {
+    return { error: "Too many sign-up attempts. Please try again later." };
+  }
+
   // Ensure the chosen school exists.
   const school = await prisma.school.findUnique({ where: { id: schoolId } });
   if (!school) return { error: "Please select a valid school." };
@@ -42,7 +53,7 @@ export async function register(
     return { error: "An account with this email already exists." };
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   // Self-registration is always for teachers; admins/school admins are assigned.
   await prisma.user.create({
     data: {
@@ -78,10 +89,26 @@ export async function login(
   }
 
   const { email, password } = parsed.data;
+
+  // Throttle failed logins to slow brute force / credential stuffing. Limit per
+  // IP (a broad spray) and per email (a targeted account) — both must pass.
+  const ip = await clientIp();
+  const ipKey = `login:ip:${ip}`;
+  const emailKey = `login:email:${email}`;
+  const ipLimit = await rateLimit(ipKey, 20, 15 * 60 * 1000);
+  const emailLimit = await rateLimit(emailKey, 10, 15 * 60 * 1000);
+  if (!ipLimit.allowed || !emailLimit.allowed) {
+    return { error: "Too many attempts. Please wait a few minutes and try again." };
+  }
+
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
     return { error: "Invalid email or password." };
   }
+
+  // Correct credentials — clear the per-account counter so prior fumbles don't
+  // linger against this user.
+  await clearRateLimit(emailKey);
 
   await createSession({ userId: user.id, role: user.role });
 

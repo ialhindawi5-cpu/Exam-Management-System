@@ -1,6 +1,7 @@
 import "server-only";
 import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "@/lib/prisma";
+import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import type { GoogleAccount } from "@prisma/client";
 
 // ── Per-teacher Google OAuth 2.0 ────────────────────────────────────────────
@@ -161,20 +162,24 @@ export async function connectAccountFromCode(opts: {
   }
   const expiresAt = new Date(Date.now() + tok.expires_in * 1000);
   const googleEmail = emailFromIdToken(tok.id_token);
+  // Encrypt the OAuth tokens at rest — a DB leak otherwise hands an attacker
+  // long-lived access to the teacher's Google Drive/Forms.
+  const accessToken = encryptSecret(tok.access_token);
+  const refreshToken = encryptSecret(tok.refresh_token);
 
   await prisma.googleAccount.upsert({
     where: { userId: opts.userId },
     update: {
-      accessToken: tok.access_token,
-      refreshToken: tok.refresh_token,
+      accessToken,
+      refreshToken,
       expiresAt,
       scope: tok.scope ?? null,
       googleEmail,
     },
     create: {
       userId: opts.userId,
-      accessToken: tok.access_token,
-      refreshToken: tok.refresh_token,
+      accessToken,
+      refreshToken,
       expiresAt,
       scope: tok.scope ?? null,
       googleEmail,
@@ -202,20 +207,20 @@ export async function getValidAccessToken(userId: string): Promise<string> {
   }
   // 60s safety margin.
   if (account.expiresAt.getTime() - 60_000 > Date.now()) {
-    return account.accessToken;
+    return decryptSecret(account.accessToken);
   }
 
   const { clientId, clientSecret } = clientCredentials();
   const tok = await tokenRequest({
     client_id: clientId,
     client_secret: clientSecret,
-    refresh_token: account.refreshToken,
+    refresh_token: decryptSecret(account.refreshToken),
     grant_type: "refresh_token",
   });
   const expiresAt = new Date(Date.now() + tok.expires_in * 1000);
   await prisma.googleAccount.update({
     where: { userId },
-    data: { accessToken: tok.access_token, expiresAt },
+    data: { accessToken: encryptSecret(tok.access_token), expiresAt },
   });
   return tok.access_token;
 }

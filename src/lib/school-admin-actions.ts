@@ -94,7 +94,7 @@ export async function setMySchoolUserPassword(userId: string, newPassword: strin
   if (!(await isManageable(admin.schoolId, userId))) {
     return { error: "You can only manage users in your own school." };
   }
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
   return { ok: true };
 }

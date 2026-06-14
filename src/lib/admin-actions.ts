@@ -12,7 +12,7 @@ export async function setUserPassword(userId: string, newPassword: string) {
   if (!newPassword || newPassword.length < 8) {
     return { error: "Password must be at least 8 characters." };
   }
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
   return { ok: true };
 }

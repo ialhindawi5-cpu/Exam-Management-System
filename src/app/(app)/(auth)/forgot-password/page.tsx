@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { Card, CardBody, Button } from "@/components/ui";
 
+// Render dynamically so the per-request CSP nonce (set in proxy.ts) is applied
+// to this page's scripts. A statically prerendered page has no request-time
+// nonce, so its inline scripts would be blocked by the strict script-src.
+export const dynamic = "force-dynamic";
+
 export default function ForgotPasswordPage() {
   return (
     <Card>
