@@ -323,6 +323,13 @@ function GradesReview({
       ? data.grades
       : data.grades.filter((g) => sectionOf(g) === sectionFilter);
 
+  // Average total mark across the shown students (whole class or one section).
+  const avgScore =
+    shown.length > 0
+      ? shown.reduce((s, g) => s + g.totalScore, 0) / shown.length
+      : 0;
+  const avgMax = shown.length > 0 ? shown[0].maxScore : 0;
+
   const pdfHref =
     `/print/exams/${examId}/grades?nameQ=${nameQ}&sectionQ=${sectionQ}` +
     (sectionFilter === "ALL"
@@ -431,6 +438,11 @@ function GradesReview({
               <span className="text-xs text-gray-500">
                 {shown.length} of {data.grades.length} shown
               </span>
+              {shown.length > 0 && (
+                <Badge color="blue">
+                  Average {round(avgScore)} / {round(avgMax)}
+                </Badge>
+              )}
             </div>
           </div>
 

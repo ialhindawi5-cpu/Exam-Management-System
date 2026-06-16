@@ -50,16 +50,33 @@ export function ResponsesPanel({
     });
   }
 
+  // Average score across responses that have been graded (the Google Forms
+  // score, shown once an answer key has been released for the form).
+  const scored = responses.filter((r) => r.totalScore !== null);
+  const maxTotal = questions.reduce((s, q) => s + q.maxPoints, 0);
+  const avgScore =
+    scored.length > 0
+      ? scored.reduce((s, r) => s + (r.totalScore ?? 0), 0) / scored.length
+      : null;
+
   return (
     <Card>
       <CardBody>
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h3 className="font-semibold text-gray-900">Student responses</h3>
-          {loaded && (
-            <Badge color={responses.length ? "green" : "gray"}>
-              {responses.length} response{responses.length === 1 ? "" : "s"}
-            </Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {avgScore !== null && (
+              <Badge color="blue">
+                Avg {Math.round(avgScore * 100) / 100}
+                {maxTotal > 0 ? ` / ${maxTotal}` : ""}
+              </Badge>
+            )}
+            {loaded && (
+              <Badge color={responses.length ? "green" : "gray"}>
+                {responses.length} response{responses.length === 1 ? "" : "s"}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {error && (
