@@ -298,7 +298,9 @@ function AiGrade({
   );
 }
 
-// One card per submission, listing every question and that student's answer.
+// "By student" view: shows ONE student's full response at a time with a
+// prev/next navigator ("‹ N of M ›") — mirrors the Google Forms individual
+// response view. Stacking 200+ responses was unusable; this pages through them.
 function StudentView({
   examId,
   aiEnabled,
@@ -310,66 +312,104 @@ function StudentView({
   questions: ExamResponseQuestion[];
   responses: ExamResponse[];
 }) {
+  const total = responses.length;
+  const [idx, setIdx] = useState(0);
+  // Clamp in case the list shrank (e.g. after a refresh) since last render.
+  const current = Math.min(Math.max(idx, 0), total - 1);
+  const r = responses[current];
+  const when = formatTime(r.submittedAt);
+
+  function go(to: number) {
+    setIdx(Math.min(Math.max(to, 0), total - 1));
+  }
+
   return (
-    <div className="space-y-4">
-      {responses.map((r, i) => {
-        const when = formatTime(r.submittedAt);
-        return (
-          <div
-            key={r.responseId}
-            className="rounded-lg border border-gray-200 p-3"
-          >
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <span className="text-sm font-medium text-gray-900">
-                  {respondentLabel(r, i)}
-                </span>
-                {when && (
-                  <span className="ml-2 text-xs text-gray-400">{when}</span>
-                )}
-              </div>
-              {r.totalScore !== null && (
-                <Badge color="blue">Score: {r.totalScore}</Badge>
-              )}
-            </div>
-            <ol className="space-y-2">
-              {questions.map((q) => {
-                const a = r.answers[q.index];
-                return (
-                  <li key={q.index} className="text-sm">
-                    <p className="text-gray-700">{q.title}</p>
-                    <p className="mt-0.5 flex items-center gap-2 pl-3">
-                      <AnswerText value={a?.value ?? ""} />
-                      <CorrectMark correct={a?.correct ?? null} />
-                      {a?.score !== null && a?.score !== undefined && (
-                        <span className="text-xs text-gray-400">
-                          {a.score} pt{a.score === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </p>
-                    {q.keywords.length > 0 && (
-                      <KeywordRubric
-                        key={`${q.index}:${a?.value ?? ""}`}
-                        keywords={q.keywords}
-                        answer={a?.value ?? ""}
-                        maxPoints={q.maxPoints}
-                      />
-                    )}
-                    {aiEnabled && isOpen(q.type) && (a?.value ?? "").trim() && (
-                      <AiGrade
-                        key={`ai:${q.index}:${a?.value ?? ""}`}
-                        examId={examId}
-                        questionIndex={q.index}
-                        answer={a?.value ?? ""}
-                      />
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
+    <div className="space-y-3">
+      {/* Individual-response navigator */}
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => go(current - 1)}
+          disabled={current === 0}
+          className="rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:opacity-40"
+        >
+          ‹ Prev
+        </button>
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span>Response</span>
+          <input
+            type="number"
+            min={1}
+            max={total}
+            value={current + 1}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) go(n - 1);
+            }}
+            className="w-16 rounded-md border border-gray-300 px-2 py-1 text-center"
+            aria-label="Go to response number"
+          />
+          <span>of {total}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => go(current + 1)}
+          disabled={current >= total - 1}
+          className="rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:opacity-40"
+        >
+          Next ›
+        </button>
+      </div>
+
+      {/* The selected student's full response */}
+      <div className="rounded-lg border border-gray-200 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-sm font-medium text-gray-900">
+              {respondentLabel(r, current)}
+            </span>
+            {when && <span className="ml-2 text-xs text-gray-400">{when}</span>}
           </div>
-        );
-      })}
+          {r.totalScore !== null && (
+            <Badge color="blue">Score: {r.totalScore}</Badge>
+          )}
+        </div>
+        <ol className="space-y-2">
+          {questions.map((q) => {
+            const a = r.answers[q.index];
+            return (
+              <li key={q.index} className="text-sm">
+                <p className="text-gray-700">{q.title}</p>
+                <p className="mt-0.5 flex items-center gap-2 pl-3">
+                  <AnswerText value={a?.value ?? ""} />
+                  <CorrectMark correct={a?.correct ?? null} />
+                  {a?.score !== null && a?.score !== undefined && (
+                    <span className="text-xs text-gray-400">
+                      {a.score} pt{a.score === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </p>
+                {q.keywords.length > 0 && (
+                  <KeywordRubric
+                    key={`${q.index}:${a?.value ?? ""}`}
+                    keywords={q.keywords}
+                    answer={a?.value ?? ""}
+                    maxPoints={q.maxPoints}
+                  />
+                )}
+                {aiEnabled && isOpen(q.type) && (a?.value ?? "").trim() && (
+                  <AiGrade
+                    key={`ai:${q.index}:${a?.value ?? ""}`}
+                    examId={examId}
+                    questionIndex={q.index}
+                    answer={a?.value ?? ""}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </div>
   );
 }
