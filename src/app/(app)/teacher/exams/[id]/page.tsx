@@ -110,6 +110,9 @@ export default async function ExamBuilderPage({
           <Link href={`/print/exams/${exam.id}`} target="_blank">
             <Button variant="secondary">Print / export PDF</Button>
           </Link>
+          <Link href={`/print/exams/${exam.id}/answer-key`} target="_blank">
+            <Button variant="secondary">Answer key (PDF)</Button>
+          </Link>
           <ExamStatusActions examId={exam.id} status={exam.status} />
         </div>
       </div>
