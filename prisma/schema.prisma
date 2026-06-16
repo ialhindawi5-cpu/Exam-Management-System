@@ -208,14 +208,6 @@ model Exam {
   googleFormCreatedAt DateTime?
   answerKeyReleasedAt DateTime? // when correct answers/points were pushed for grading
 
-  // Answer key uploaded as a PDF and used to AI-grade responses *in-app*
-  // (distinct from the Google Forms key above). `answerKey` holds the structured
-  // key the AI extracted from the PDF: [{ index, title, answer }], aligned to the
-  // exam's gradable questions by position.
-  answerKey           Json?
-  answerKeyFileName   String?
-  answerKeyUploadedAt DateTime?
-
   // When set, a scheduled job auto-publishes the exam (and opens its Google
   // Form) at this time. Cleared once it fires or the teacher publishes manually.
   scheduledPublishAt DateTime?
@@ -237,30 +229,6 @@ model Exam {
   updatedAt DateTime @updatedAt
 
   examQuestions ExamQuestion[]
-  grades        ExamGrade[]
-}
-
-// A persisted, teacher-editable grade for one student's Google Form response,
-// produced by AI grading the response against the exam's uploaded answer-key
-// PDF. Responses themselves live in Google Forms (not stored here); a grade is
-// linked back to its response by the Google Forms `responseId`.
-model ExamGrade {
-  id           String  @id @default(cuid())
-  examId       String
-  exam         Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
-  responseId   String // Google Forms response id
-  studentEmail String? // respondent email when the form collects it
-  // Per-question marks: [{ index, title, maxPoints, aiScore, score, feedback }].
-  // `aiScore` is the AI's suggestion; `score` is the current (possibly edited) mark.
-  perQuestion Json
-  totalScore  Float // sum of per-question `score` (reflects teacher edits)
-  maxScore    Float // sum of per-question maxPoints
-  aiTotal     Float // the AI's original total, before any teacher edit
-  edited      Boolean  @default(false) // true once a teacher overrides any mark
-  gradedAt    DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([examId, responseId])
 }
 
 // Join table: questions placed in an exam, with ordering and optional point override.
