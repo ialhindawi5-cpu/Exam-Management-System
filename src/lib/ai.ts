@@ -5,6 +5,14 @@ import type { QuestionType, Difficulty } from "@prisma/client";
 // Default to a current, capable model; override with ANTHROPIC_MODEL.
 export const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
+// Grading runs one AI call per student (hundreds per exam), so it dominates
+// cost. Default it to the cheaper, faster Haiku model — grading an answer
+// against an explicit key is a constrained task it handles well. PDF answer-key
+// reading and question generation stay on MODEL (better comprehension). Override
+// with ANTHROPIC_GRADING_MODEL.
+export const GRADING_MODEL =
+  process.env.ANTHROPIC_GRADING_MODEL ?? "claude-haiku-4-5";
+
 function client(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -78,10 +86,11 @@ async function createJson<T>(opts: {
   system: string;
   content: string | Anthropic.ContentBlockParam[];
   schema: Record<string, unknown>;
+  model?: string;
 }): Promise<T> {
   const c = client();
   const base = {
-    model: MODEL,
+    model: opts.model ?? MODEL,
     max_tokens: opts.maxTokens,
     system: opts.system,
     messages: [{ role: "user" as const, content: opts.content }],
@@ -472,6 +481,7 @@ Return {"grades": [{"index": <the #>, "score": <0..max for that question>, "feed
     system,
     content: prompt,
     schema: GRADE_SCHEMA,
+    model: GRADING_MODEL,
   });
 
   // Clamp each score to its question's max and guarantee one entry per item.
