@@ -183,16 +183,75 @@ export async function uploadAnswerKey(
   }
 }
 
-export type GradeAllResult =
-  | { ok: true; graded: number; skipped: number }
+export type GradeBatchResult =
+  | {
+      ok: true;
+      gradedNow: number; // successfully graded in THIS batch
+      failedNow: number; // errored in this batch (will retry on next call)
+      totalGraded: number; // total responses with a saved grade so far
+      totalResponses: number;
+      remaining: number; // still ungraded after this batch
+    }
   | { error: string };
 
-// AI-grade every Google Form response against the stored answer key, persisting
-// one ExamGrade per response. Re-running refreshes the AI marks and DISCARDS any
-// prior teacher edits for that response (a clean re-grade).
-export async function gradeAllResponses(
+// Grade ONE response against the answer key and upsert its ExamGrade. Shared by
+// the batch grader. Throws on AI/DB failure so the caller can count it.
+async function gradeOneResponse(
   examId: string,
-): Promise<GradeAllResult> {
+  language: string,
+  questions: { index: number; title: string; maxPoints: number }[],
+  keyByIndex: Map<number, string>,
+  r: ExamResponse,
+): Promise<void> {
+  const items = questions.map((q) => ({
+    index: q.index,
+    title: q.title,
+    maxPoints: q.maxPoints,
+    correctAnswer: keyByIndex.get(q.index) ?? "",
+    studentAnswer: r.answers[q.index]?.value ?? "",
+  }));
+  const marks = await gradeAgainstKey({ items, language });
+  const markByIndex = new Map(marks.map((m) => [m.index, m]));
+
+  const perQuestion: PerQuestionMark[] = questions.map((q) => {
+    const m = markByIndex.get(q.index);
+    const score = m?.score ?? 0;
+    return {
+      index: q.index,
+      title: q.title,
+      maxPoints: q.maxPoints,
+      aiScore: score,
+      score,
+      feedback: m?.feedback ?? "",
+    };
+  });
+  const totalScore = perQuestion.reduce((s, m) => s + m.score, 0);
+  const maxScore = perQuestion.reduce((s, m) => s + m.maxPoints, 0);
+
+  const data = {
+    studentEmail: r.email,
+    perQuestion: perQuestion as unknown as Prisma.InputJsonValue,
+    totalScore,
+    maxScore,
+    aiTotal: totalScore,
+    edited: false,
+  };
+  await prisma.examGrade.upsert({
+    where: { examId_responseId: { examId, responseId: r.responseId } },
+    update: { ...data, gradedAt: new Date() },
+    create: { examId, responseId: r.responseId, ...data },
+  });
+}
+
+// Grade the NEXT batch of not-yet-graded responses, in parallel. The client
+// calls this repeatedly until `remaining` is 0 — this keeps every request short
+// (no serverless timeout) and makes grading resumable: already-graded responses
+// are skipped, so a failed/closed tab just continues where it left off. Use
+// `clearGrades` first for a full re-grade. `batchSize` also bounds concurrency.
+export async function gradeNextBatch(
+  examId: string,
+  batchSize = 8,
+): Promise<GradeBatchResult> {
   const teacher = await requireRole("TEACHER");
   const exam = await ownedExam(examId, teacher.id);
   if (!exam) return { error: "Exam not found." };
@@ -212,58 +271,57 @@ export async function gradeAllResponses(
   }
 
   const keyByIndex = new Map(answerKey.map((k) => [k.index, k.answer]));
+  const size = Math.min(Math.max(batchSize, 1), 20);
 
-  let graded = 0;
-  let skipped = 0;
-  for (const r of responses) {
-    try {
-      const items = questions.map((q) => ({
-        index: q.index,
-        title: q.title,
-        maxPoints: q.maxPoints,
-        correctAnswer: keyByIndex.get(q.index) ?? "",
-        studentAnswer: r.answers[q.index]?.value ?? "",
-      }));
-      const marks = await gradeAgainstKey({ items, language: exam.language });
-      const markByIndex = new Map(marks.map((m) => [m.index, m]));
+  // Skip responses that already have a saved grade (resumable).
+  const existing = await prisma.examGrade.findMany({
+    where: { examId },
+    select: { responseId: true },
+  });
+  const done = new Set(existing.map((g) => g.responseId));
+  const pending = responses.filter((r) => !done.has(r.responseId));
+  const batch = pending.slice(0, size);
 
-      const perQuestion: PerQuestionMark[] = questions.map((q) => {
-        const m = markByIndex.get(q.index);
-        const score = m?.score ?? 0;
-        return {
-          index: q.index,
-          title: q.title,
-          maxPoints: q.maxPoints,
-          aiScore: score,
-          score,
-          feedback: m?.feedback ?? "",
-        };
-      });
-      const totalScore = perQuestion.reduce((s, m) => s + m.score, 0);
-      const maxScore = perQuestion.reduce((s, m) => s + m.maxPoints, 0);
-
-      const data = {
-        studentEmail: r.email,
-        perQuestion: perQuestion as unknown as Prisma.InputJsonValue,
-        totalScore,
-        maxScore,
-        aiTotal: totalScore,
-        edited: false,
-      };
-      await prisma.examGrade.upsert({
-        where: { examId_responseId: { examId, responseId: r.responseId } },
-        update: { ...data, gradedAt: new Date() },
-        create: { examId, responseId: r.responseId, ...data },
-      });
-      graded += 1;
-    } catch (e) {
-      console.error(`Grading response ${r.responseId} failed:`, e);
-      skipped += 1;
+  let gradedNow = 0;
+  let failedNow = 0;
+  // Grade the batch concurrently — the main speed-up over the old sequential loop.
+  const results = await Promise.allSettled(
+    batch.map((r) =>
+      gradeOneResponse(examId, exam.language, questions, keyByIndex, r),
+    ),
+  );
+  for (const [i, result] of results.entries()) {
+    if (result.status === "fulfilled") gradedNow += 1;
+    else {
+      failedNow += 1;
+      console.error(`Grading response ${batch[i].responseId} failed:`, result.reason);
     }
   }
 
+  const totalGraded = done.size + gradedNow;
+  const remaining = Math.max(responses.length - totalGraded, 0);
+  if (remaining === 0 || gradedNow > 0) revalidatePath(`/teacher/exams/${examId}`);
+  return {
+    ok: true,
+    gradedNow,
+    failedNow,
+    totalGraded,
+    totalResponses: responses.length,
+    remaining,
+  };
+}
+
+// Delete all saved grades for an exam so the next grading pass starts fresh.
+// Used by "Re-grade all" (discards any teacher edits too).
+export async function clearGrades(
+  examId: string,
+): Promise<{ ok: true; deleted: number } | { error: string }> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+  const { count } = await prisma.examGrade.deleteMany({ where: { examId } });
   revalidatePath(`/teacher/exams/${examId}`);
-  return { ok: true, graded, skipped };
+  return { ok: true, deleted: count };
 }
 
 // Load everything the grading panel needs: the stored answer key + grades, plus

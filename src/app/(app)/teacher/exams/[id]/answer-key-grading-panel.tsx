@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import {
   uploadAnswerKey,
-  gradeAllResponses,
+  gradeNextBatch,
+  clearGrades,
   getGradingData,
   saveGradeEdits,
   type UploadKeyResult,
@@ -39,9 +40,15 @@ export function AnswerKeyGradingPanel({
 
   const [data, setData] = useState<GradingData | null>(null);
   const [loading, startLoading] = useTransition();
-  const [grading, startGrading] = useTransition();
   const [gradeError, setGradeError] = useState<string | null>(null);
   const [gradeNotice, setGradeNotice] = useState<string | null>(null);
+  // Grading runs in client-driven batches; this tracks live progress. Null when idle.
+  const [progress, setProgress] = useState<
+    { done: number; total: number } | null
+  >(null);
+  const cancelRef = useRef(false);
+
+  const grading = progress !== null;
 
   function load() {
     setGradeError(null);
@@ -59,22 +66,49 @@ export function AnswerKeyGradingPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState]);
 
-  function gradeAll() {
+  // Grade in batches until done. Resumable: skips already-graded responses, so
+  // this also "fills in" any that previously failed. `regrade` wipes first.
+  async function runGrading(regrade: boolean) {
     setGradeError(null);
     setGradeNotice(null);
-    startGrading(async () => {
-      const res = await gradeAllResponses(examId);
-      if ("error" in res) {
-        setGradeError(res.error);
-        return;
+    cancelRef.current = false;
+    setProgress({ done: 0, total: 0 });
+    try {
+      if (regrade) {
+        const cleared = await clearGrades(examId);
+        if ("error" in cleared) {
+          setGradeError(cleared.error);
+          setProgress(null);
+          return;
+        }
       }
-      setGradeNotice(
-        `Graded ${res.graded} response${res.graded === 1 ? "" : "s"}` +
-          (res.skipped ? ` · ${res.skipped} skipped` : ""),
-      );
+      let failed = 0;
+      // Loop one batch at a time; each call is short enough to never time out.
+      for (;;) {
+        if (cancelRef.current) break;
+        const res = await gradeNextBatch(examId, 8);
+        if ("error" in res) {
+          setGradeError(res.error);
+          break;
+        }
+        failed += res.failedNow;
+        setProgress({ done: res.totalGraded, total: res.totalResponses });
+        if (res.remaining === 0) {
+          setGradeNotice(
+            `Graded ${res.totalGraded} of ${res.totalResponses} response${
+              res.totalResponses === 1 ? "" : "s"
+            }` + (failed ? ` · ${failed} failed — click again to retry` : ""),
+          );
+          break;
+        }
+        // Guard against a stuck loop: if a full batch made no progress, stop.
+        if (res.gradedNow === 0 && res.failedNow === 0) break;
+      }
+    } finally {
+      setProgress(null);
       const d = await getGradingData(examId);
       setData(d);
-    });
+    }
   }
 
   if (!aiEnabled) {
@@ -163,11 +197,25 @@ export function AnswerKeyGradingPanel({
           <Button
             variant="success"
             disabled={grading || !hasKey}
-            onClick={gradeAll}
+            onClick={() => runGrading(false)}
           >
-            {grading ? "Grading all responses…" : "Grade all responses with AI"}
+            {grading ? "Grading…" : "Grade all responses with AI"}
           </Button>
-          <Button variant="secondary" disabled={loading} onClick={load}>
+          {grading ? (
+            <Button variant="secondary" onClick={() => (cancelRef.current = true)}>
+              Stop
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              disabled={!hasKey}
+              onClick={() => runGrading(true)}
+              title="Discard all marks and grade every response again from scratch"
+            >
+              Re-grade all
+            </Button>
+          )}
+          <Button variant="secondary" disabled={loading || grading} onClick={load}>
             {loading ? "Loading…" : data ? "Refresh" : "Load grades"}
           </Button>
           {data && (
@@ -176,6 +224,34 @@ export function AnswerKeyGradingPanel({
             </a>
           )}
         </div>
+
+        {progress && (
+          <div className="mt-3">
+            <div className="mb-1 flex justify-between text-xs text-gray-600">
+              <span>
+                Grading… {progress.done}
+                {progress.total ? ` / ${progress.total}` : ""} responses
+              </span>
+              {progress.total > 0 && (
+                <span>{Math.round((progress.done / progress.total) * 100)}%</span>
+              )}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+              <div
+                className="h-full rounded-full bg-green-600 transition-all"
+                style={{
+                  width: progress.total
+                    ? `${Math.min((progress.done / progress.total) * 100, 100)}%`
+                    : "10%",
+                }}
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-gray-400">
+              You can leave this open — grading continues in batches and is
+              resumable if interrupted.
+            </p>
+          </div>
+        )}
 
         {gradeError && (
           <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
