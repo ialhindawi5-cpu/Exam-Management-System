@@ -12,7 +12,24 @@ import {
   type StudentGrade,
 } from "@/lib/grading-actions";
 import type { ExamResponse } from "@/lib/google-forms";
-import { Card, CardBody, Button, Badge, Input, Label } from "@/components/ui";
+import { Card, CardBody, Button, Badge, Input, Label, Select } from "@/components/ui";
+
+// Pick the question whose title looks like the student-name / section field, so
+// the grade report is labelled and grouped sensibly out of the box. Falls back
+// to the first / second question. Indices are response-answer indices.
+const NAME_HINTS = ["name", "الاسم", "اسم", "nom"];
+const SECTION_HINTS = ["section", "class", "grade", "الصف", "صف", "classe", "shu"];
+
+function detectQuestion(
+  questions: { index: number; title: string }[],
+  hints: string[],
+  fallback: number,
+): number {
+  const hit = questions.find((q) =>
+    hints.some((h) => q.title.toLowerCase().includes(h)),
+  );
+  return hit?.index ?? questions[fallback]?.index ?? questions[0]?.index ?? 0;
+}
 
 export function AnswerKeyGradingPanel({
   examId,
@@ -283,6 +300,35 @@ function GradesReview({
     data.responses.map((r) => [r.responseId, r]),
   );
 
+  // Which question holds the student's name / class-section. Auto-detected, but
+  // the teacher can correct it (the labels and grouping update live).
+  const [nameQ, setNameQ] = useState(() =>
+    detectQuestion(data.questions, NAME_HINTS, 0),
+  );
+  const [sectionQ, setSectionQ] = useState(() =>
+    detectQuestion(data.questions, SECTION_HINTS, 1),
+  );
+  const [sectionFilter, setSectionFilter] = useState("ALL");
+
+  const answerOf = (g: StudentGrade, qIndex: number) =>
+    responsesByItem.get(g.responseId)?.answers[qIndex]?.value?.trim() ?? "";
+  const sectionOf = (g: StudentGrade) => answerOf(g, sectionQ) || "—";
+  const nameOf = (g: StudentGrade) => answerOf(g, nameQ);
+
+  const allSections = [...new Set(data.grades.map(sectionOf))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+  const shown =
+    sectionFilter === "ALL"
+      ? data.grades
+      : data.grades.filter((g) => sectionOf(g) === sectionFilter);
+
+  const pdfHref =
+    `/print/exams/${examId}/grades?nameQ=${nameQ}&sectionQ=${sectionQ}` +
+    (sectionFilter === "ALL"
+      ? ""
+      : `&section=${encodeURIComponent(sectionFilter)}`);
+
   return (
     <div className="mt-5 space-y-4">
       {data.responsesError && (
@@ -318,16 +364,84 @@ function GradesReview({
         </p>
       ) : (
         <div className="space-y-3">
-          <p className="text-xs text-gray-500">
-            {data.grades.length} graded · edit any mark; the total updates and is
-            saved.
-          </p>
-          {data.grades.map((g) => (
+          {/* Section grouping + PDF export controls */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <Label htmlFor="name-q" className="text-xs">
+                  Student-name question
+                </Label>
+                <Select
+                  id="name-q"
+                  value={nameQ}
+                  onChange={(e) => setNameQ(Number(e.target.value))}
+                >
+                  {data.questions.map((q) => (
+                    <option key={q.index} value={q.index}>
+                      {q.index + 1}. {q.title}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="section-q" className="text-xs">
+                  Class / section question
+                </Label>
+                <Select
+                  id="section-q"
+                  value={sectionQ}
+                  onChange={(e) => {
+                    setSectionQ(Number(e.target.value));
+                    setSectionFilter("ALL");
+                  }}
+                >
+                  {data.questions.map((q) => (
+                    <option key={q.index} value={q.index}>
+                      {q.index + 1}. {q.title}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="section-filter" className="text-xs">
+                  Show section
+                </Label>
+                <Select
+                  id="section-filter"
+                  value={sectionFilter}
+                  onChange={(e) => setSectionFilter(e.target.value)}
+                >
+                  <option value="ALL">All sections ({data.grades.length})</option>
+                  {allSections.map((s) => (
+                    <option key={s} value={s}>
+                      {s} ({data.grades.filter((g) => sectionOf(g) === s).length})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <a href={pdfHref} target="_blank" rel="noreferrer">
+                <Button variant="secondary">
+                  {sectionFilter === "ALL"
+                    ? "Download all sections (PDF)"
+                    : `Download ${sectionFilter} (PDF)`}
+                </Button>
+              </a>
+              <span className="text-xs text-gray-500">
+                {shown.length} of {data.grades.length} shown
+              </span>
+            </div>
+          </div>
+
+          {shown.map((g) => (
             <StudentGradeCard
               key={g.responseId}
               examId={examId}
               grade={g}
               response={responsesByItem.get(g.responseId) ?? null}
+              name={nameOf(g)}
+              section={sectionOf(g)}
             />
           ))}
         </div>
@@ -340,10 +454,14 @@ function StudentGradeCard({
   examId,
   grade,
   response,
+  name,
+  section,
 }: {
   examId: string;
   grade: StudentGrade;
   response: ExamResponse | null;
+  name?: string;
+  section?: string;
 }) {
   // Local editable scores, keyed by question index, as strings (input values).
   const [scores, setScores] = useState<Record<number, string>>(() =>
@@ -406,13 +524,19 @@ function StudentGradeCard({
     });
   }
 
-  const label = grade.studentEmail ?? `Response ${grade.responseId.slice(-6)}`;
+  const label =
+    name?.trim() ||
+    grade.studentEmail ||
+    `Response ${grade.responseId.slice(-6)}`;
 
   return (
     <div className="rounded-lg border border-gray-200 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-gray-900">{label}</span>
+          {section && section !== "—" && (
+            <Badge color="gray">{section}</Badge>
+          )}
           {edited && <Badge color="yellow">Edited</Badge>}
         </div>
         <div className="flex items-center gap-1 text-sm text-gray-700">
