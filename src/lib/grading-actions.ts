@@ -384,13 +384,16 @@ export type SaveGradeResult =
   | { ok: true; grade: StudentGrade }
   | { error: string };
 
-// Persist a teacher's per-question overrides for one student. `edits` is a
-// sparse list of { index, score }; each score is clamped to that question's max.
-// The total is recomputed and the grade flagged as teacher-edited.
+// Persist a teacher's overrides for one student. `edits` is a sparse list of
+// { index, score } per-question marks (each clamped to that question's max).
+// `totalOverride`, when given, sets the final total directly (clamped to
+// [0, maxScore]) instead of using the per-question sum — so the teacher can type
+// a final mark that differs from the sum. The grade is flagged as teacher-edited.
 export async function saveGradeEdits(
   examId: string,
   responseId: string,
   edits: { index: number; score: number }[],
+  totalOverride?: number,
 ): Promise<SaveGradeResult> {
   const teacher = await requireRole("TEACHER");
   const exam = await ownedExam(examId, teacher.id);
@@ -410,8 +413,16 @@ export async function saveGradeEdits(
     score = Math.max(0, Math.min(m.maxPoints, score));
     return { ...m, score };
   });
-  const totalScore = next.reduce((s, m) => s + m.score, 0);
-  const edited = next.some((m) => m.score !== m.aiScore);
+  const computed = next.reduce((s, m) => s + m.score, 0);
+
+  // Use the explicit total when provided (and valid), else the per-question sum.
+  let totalScore = computed;
+  if (totalOverride !== undefined && Number.isFinite(totalOverride)) {
+    totalScore = Math.max(0, Math.min(row.maxScore, totalOverride));
+  }
+
+  const edited =
+    next.some((m) => m.score !== m.aiScore) || totalScore !== row.aiTotal;
 
   const updated = await prisma.examGrade.update({
     where: { examId_responseId: { examId, responseId } },

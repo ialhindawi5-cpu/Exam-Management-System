@@ -349,23 +349,30 @@ function StudentGradeCard({
   const [scores, setScores] = useState<Record<number, string>>(() =>
     Object.fromEntries(grade.perQuestion.map((m) => [m.index, String(m.score)])),
   );
+  // The final total is also directly editable (overrides the per-question sum).
+  const [totalInput, setTotalInput] = useState(String(round(grade.totalScore)));
   const [saving, startSaving] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [edited, setEdited] = useState(grade.edited);
 
-  const total = grade.perQuestion.reduce((sum, m) => {
-    const v = Number(scores[m.index]);
-    return sum + (Number.isFinite(v) ? v : 0);
-  }, 0);
+  const total = Number(totalInput);
 
-  const dirty = grade.perQuestion.some(
-    (m) => Number(scores[m.index]) !== m.score,
-  );
+  const dirty =
+    grade.perQuestion.some((m) => Number(scores[m.index]) !== m.score) ||
+    (Number.isFinite(total) && total !== grade.totalScore);
 
+  // Editing a per-question mark keeps the total field in sync with the new sum
+  // (the teacher can still type a different final total afterwards).
   function setScore(index: number, value: string) {
     setSaved(false);
-    setScores((prev) => ({ ...prev, [index]: value }));
+    const nextScores = { ...scores, [index]: value };
+    setScores(nextScores);
+    const sum = grade.perQuestion.reduce((s, m) => {
+      const v = Number(nextScores[m.index]);
+      return s + (Number.isFinite(v) ? v : 0);
+    }, 0);
+    setTotalInput(String(round(sum)));
   }
 
   function save() {
@@ -375,8 +382,14 @@ function StudentGradeCard({
       index: m.index,
       score: Number(scores[m.index]) || 0,
     }));
+    const override = Number(totalInput);
     startSaving(async () => {
-      const res = await saveGradeEdits(examId, grade.responseId, edits);
+      const res = await saveGradeEdits(
+        examId,
+        grade.responseId,
+        edits,
+        Number.isFinite(override) ? override : undefined,
+      );
       if ("error" in res) {
         setError(res.error);
         return;
@@ -387,6 +400,7 @@ function StudentGradeCard({
           res.grade.perQuestion.map((m) => [m.index, String(m.score)]),
         ),
       );
+      setTotalInput(String(round(res.grade.totalScore)));
       setEdited(res.grade.edited);
       setSaved(true);
     });
@@ -401,12 +415,23 @@ function StudentGradeCard({
           <span className="text-sm font-medium text-gray-900">{label}</span>
           {edited && <Badge color="yellow">Edited</Badge>}
         </div>
-        <div className="text-sm text-gray-700">
-          Total:{" "}
-          <span className="font-semibold text-gray-900">
-            {round(total)} / {round(grade.maxScore)}
-          </span>
-          <span className="ml-2 text-xs text-gray-400">
+        <div className="flex items-center gap-1 text-sm text-gray-700">
+          <span>Total:</span>
+          <Input
+            type="number"
+            min="0"
+            max={grade.maxScore}
+            step="0.5"
+            value={totalInput}
+            onChange={(e) => {
+              setSaved(false);
+              setTotalInput(e.target.value);
+            }}
+            className="w-16 text-right font-semibold"
+            aria-label="Final total mark"
+          />
+          <span className="text-gray-500">/ {round(grade.maxScore)}</span>
+          <span className="ml-1 text-xs text-gray-400">
             (AI: {round(grade.aiTotal)})
           </span>
         </div>
