@@ -414,7 +414,9 @@ function StudentView({
   );
 }
 
-// One block per question, listing every student's answer underneath.
+// "By question" view: shows ONE question at a time with a prev/next navigator
+// ("‹ N of M ›") plus a dropdown to jump to any question — mirrors the Google
+// Forms "Question" tab. Every student's answer to that question is listed below.
 function QuestionView({
   questions,
   responses,
@@ -422,37 +424,82 @@ function QuestionView({
   questions: ExamResponseQuestion[];
   responses: ExamResponse[];
 }) {
+  const total = questions.length;
+  const [idx, setIdx] = useState(0);
+  const current = Math.min(Math.max(idx, 0), total - 1);
+  const q = questions[current];
+
+  function go(to: number) {
+    setIdx(Math.min(Math.max(to, 0), total - 1));
+  }
+
   return (
-    <div className="space-y-4">
-      {questions.map((q) => (
-        <div key={q.index} className="rounded-lg border border-gray-200 p-3">
-          <p className="mb-2 text-sm font-medium text-gray-900">
-            {q.title}
-            {q.maxPoints > 0 && (
-              <span className="ml-2 text-xs font-normal text-gray-400">
-                {q.maxPoints} pt{q.maxPoints === 1 ? "" : "s"}
-              </span>
-            )}
-          </p>
-          <ul className="space-y-1">
-            {responses.map((r, i) => {
-              const a = r.answers[q.index];
-              return (
-                <li
-                  key={r.responseId}
-                  className="flex flex-wrap items-center gap-2 text-sm"
-                >
-                  <span className="min-w-0 truncate text-gray-500">
-                    {respondentLabel(r, i)}:
-                  </span>
-                  <AnswerText value={a?.value ?? ""} />
-                  <CorrectMark correct={a?.correct ?? null} />
-                </li>
-              );
-            })}
-          </ul>
+    <div className="space-y-3">
+      {/* Question navigator: dropdown + prev/next */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+        <select
+          value={current}
+          onChange={(e) => go(Number(e.target.value))}
+          className="min-w-0 max-w-[60%] flex-1 truncate rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+          aria-label="Select question"
+        >
+          {questions.map((qq, i) => (
+            <option key={qq.index} value={i}>
+              {i + 1}. {qq.title}
+            </option>
+          ))}
+        </select>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => go(current - 1)}
+            disabled={current === 0}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:opacity-40"
+          >
+            ‹
+          </button>
+          <span className="text-sm text-gray-600">
+            {current + 1} of {total}
+          </span>
+          <button
+            type="button"
+            onClick={() => go(current + 1)}
+            disabled={current >= total - 1}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:opacity-40"
+          >
+            ›
+          </button>
         </div>
-      ))}
+      </div>
+
+      {/* The selected question + every student's answer to it */}
+      <div className="rounded-lg border border-gray-200 p-3">
+        <p className="mb-2 text-sm font-medium text-gray-900">
+          {q.title}
+          {q.maxPoints > 0 && (
+            <span className="ml-2 text-xs font-normal text-gray-400">
+              {q.maxPoints} pt{q.maxPoints === 1 ? "" : "s"}
+            </span>
+          )}
+        </p>
+        <ul className="space-y-1">
+          {responses.map((r, i) => {
+            const a = r.answers[q.index];
+            return (
+              <li
+                key={r.responseId}
+                className="flex flex-wrap items-center gap-2 text-sm"
+              >
+                <span className="min-w-0 truncate text-gray-500">
+                  {respondentLabel(r, i)}:
+                </span>
+                <AnswerText value={a?.value ?? ""} />
+                <CorrectMark correct={a?.correct ?? null} />
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }
