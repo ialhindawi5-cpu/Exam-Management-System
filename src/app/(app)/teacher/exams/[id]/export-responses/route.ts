@@ -44,6 +44,11 @@ export async function GET(
   });
   const title = exam?.title ?? "Exam";
 
+  // AI/teacher grades persisted in-app (from the answer-key grading panel),
+  // keyed by Google Forms response id so we can line them up with each student.
+  const gradeRows = await prisma.examGrade.findMany({ where: { examId: id } });
+  const gradeByResponse = new Map(gradeRows.map((g) => [g.responseId, g]));
+
   const wb = new ExcelJS.Workbook();
   wb.creator = "Exam System";
 
@@ -96,8 +101,46 @@ export async function GET(
     ]);
   });
 
+  // ---- Sheet 3: Final marks (AI grade + teacher edits), if any exist ----
+  if (gradeRows.length > 0) {
+    type Mark = { index: number; score: number };
+    const marks = wb.addWorksheet("Final marks");
+    marks.addRow([
+      "#",
+      "Student",
+      "Final total",
+      "Max total",
+      "AI total",
+      "Edited?",
+      ...questions.map((_, i) => `Q${i + 1}`),
+    ]);
+    responses.forEach((r, i) => {
+      const g = gradeByResponse.get(r.responseId);
+      if (!g) return;
+      const perQ = Array.isArray(g.perQuestion)
+        ? (g.perQuestion as unknown as Mark[])
+        : [];
+      const scoreByIndex = new Map(perQ.map((m) => [Number(m.index), Number(m.score)]));
+      marks.addRow([
+        i + 1,
+        respondentLabel(r.email, i),
+        g.totalScore,
+        g.maxScore,
+        g.aiTotal,
+        g.edited ? "yes" : "",
+        ...questions.map((q) => {
+          const s = scoreByIndex.get(q.index);
+          return s === undefined ? "" : s;
+        }),
+      ]);
+    });
+  }
+
   // Shared styling: bold header, frozen header + label columns, sane widths.
-  for (const sheet of [answers, scores]) {
+  // The Answers/Scores sheets share the same base columns (with "Submitted" in
+  // column 3); the "Final marks" sheet has its own shape, so only header + width
+  // styling is applied generically and its date format is skipped.
+  for (const sheet of wb.worksheets) {
     sheet.getRow(1).font = { bold: true };
     sheet.views = [{ state: "frozen", ySplit: 1, xSplit: 2 }];
     const total = sheet.columnCount;
@@ -106,7 +149,10 @@ export async function GET(
       col.width = c <= baseWidths.length ? baseWidths[c - 1] : 24;
       if (c > baseWidths.length) col.alignment = { wrapText: true, vertical: "top" };
     }
-    // Format the "Submitted" column as a readable date-time.
+  }
+  // Format the "Submitted" column (column 3) as a date-time on the two response
+  // sheets only — on "Final marks" column 3 is a numeric total.
+  for (const sheet of [answers, scores]) {
     sheet.getColumn(3).numFmt = "yyyy-mm-dd hh:mm";
   }
 
