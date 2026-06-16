@@ -15,6 +15,7 @@ import { ExamMetaForm } from "./exam-meta-form";
 import { GoogleFormPanel } from "./google-form-panel";
 import { SchedulePublish } from "./schedule-publish";
 import { ResponsesPanel } from "./responses-panel";
+import { AnswerKeyGradingPanel } from "./answer-key-grading-panel";
 import { PdfImportPanel } from "./pdf-import-panel";
 import {
   ExamQuestionsManager,
@@ -177,6 +178,16 @@ export default async function ExamBuilderPage({
           <ResponsesPanel examId={exam.id} aiEnabled={aiEnabled()} />
         </div>
       )}
+
+      <div className="mb-6">
+        <AnswerKeyGradingPanel
+          examId={exam.id}
+          aiEnabled={aiEnabled()}
+          hasGoogleForm={Boolean(exam.googleFormId)}
+          initialKeyFileName={exam.answerKeyFileName}
+          initialKeyUploadedAt={exam.answerKeyUploadedAt?.toISOString() ?? null}
+        />
+      </div>
 
       <div className="mb-6">
         <PdfImportPanel
