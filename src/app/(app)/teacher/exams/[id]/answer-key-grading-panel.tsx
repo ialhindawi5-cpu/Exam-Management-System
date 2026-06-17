@@ -7,10 +7,12 @@ import {
   clearGrades,
   getGradingData,
   saveGradeEdits,
+  saveAnswerKeyPoints,
   type UploadKeyResult,
   type GradingData,
   type StudentGrade,
 } from "@/lib/grading-actions";
+import type { ExtractedKeyItem } from "@/lib/ai";
 import type { ExamResponse } from "@/lib/google-forms";
 import { Card, CardBody, Button, Badge, Input, Label, Select } from "@/components/ui";
 
@@ -281,7 +283,7 @@ export function AnswerKeyGradingPanel({
           </p>
         )}
 
-        {data && <GradesReview examId={examId} data={data} />}
+        {data && <GradesReview examId={examId} data={data} onChanged={load} />}
       </CardBody>
     </Card>
   );
@@ -289,12 +291,119 @@ export function AnswerKeyGradingPanel({
 
 // Renders the extracted key (collapsible) and one editable card per graded
 // student. Edits are saved per-student.
+// Collapsible answer-key view that lets the teacher set each question's max
+// marks (and see the extracted correct answer). Points feed the next grading
+// pass — set a question to 0 to leave it ungraded (e.g. name / class fields).
+function AnswerKeyEditor({
+  examId,
+  answerKey,
+  onSaved,
+}: {
+  examId: string;
+  answerKey: ExtractedKeyItem[];
+  onSaved: () => void;
+}) {
+  const [points, setPoints] = useState<Record<number, string>>(() =>
+    Object.fromEntries(answerKey.map((k) => [k.index, String(k.points ?? 0)])),
+  );
+  const [saving, startSaving] = useTransition();
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const totalMax = answerKey.reduce(
+    (s, k) => s + (Number(points[k.index]) || 0),
+    0,
+  );
+  const dirty = answerKey.some(
+    (k) => Number(points[k.index]) !== (k.points ?? 0),
+  );
+
+  function save() {
+    setError(null);
+    setSaved(false);
+    const updates = answerKey.map((k) => ({
+      index: k.index,
+      points: Number(points[k.index]) || 0,
+    }));
+    startSaving(async () => {
+      const res = await saveAnswerKeyPoints(examId, updates);
+      if ("error" in res) {
+        setError(res.error);
+        return;
+      }
+      setSaved(true);
+      onSaved();
+    });
+  }
+
+  return (
+    <details className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <summary className="cursor-pointer text-sm font-medium text-gray-700">
+        Answer key &amp; marks per question ({answerKey.length}) · total{" "}
+        {Math.round(totalMax * 100) / 100}
+      </summary>
+      <p className="mt-2 text-xs text-gray-500">
+        Set how many marks each question is worth. Questions imported with 0
+        points aren&apos;t graded by the AI — give them a value here, then
+        re-grade. Leave name/class fields at 0.
+      </p>
+      <ol className="mt-2 space-y-2 text-sm">
+        {answerKey.map((k) => (
+          <li key={k.index} className="border-b border-gray-200 pb-2">
+            <div className="flex items-start justify-between gap-3">
+              <p className="min-w-0 text-gray-700">
+                <span className="text-gray-400">{k.index + 1}.</span> {k.title}
+              </p>
+              <div className="flex shrink-0 items-center gap-1">
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={points[k.index] ?? ""}
+                  onChange={(e) => {
+                    setSaved(false);
+                    setPoints((p) => ({ ...p, [k.index]: e.target.value }));
+                  }}
+                  className="w-16 text-right"
+                  aria-label="Marks for this question"
+                />
+                <span className="text-xs text-gray-400">pts</span>
+              </div>
+            </div>
+            <div className="ps-5 text-green-700">
+              {k.answer ? `→ ${k.answer}` : "→ (no answer found in PDF)"}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-2 flex items-center gap-2">
+        <Button
+          variant="secondary"
+          disabled={saving || !dirty}
+          onClick={save}
+          className="px-3 py-1 text-xs"
+        >
+          {saving ? "Saving…" : "Save points"}
+        </Button>
+        {saved && (
+          <span className="text-xs text-green-600">
+            Saved — re-grade to apply
+          </span>
+        )}
+        {error && <span className="text-xs text-red-600">{error}</span>}
+      </div>
+    </details>
+  );
+}
+
 function GradesReview({
   examId,
   data,
+  onChanged,
 }: {
   examId: string;
   data: GradingData;
+  onChanged: () => void;
 }) {
   const responsesByItem = new Map<string, ExamResponse>(
     data.responses.map((r) => [r.responseId, r]),
@@ -346,22 +455,11 @@ function GradesReview({
       )}
 
       {data.answerKey.length > 0 && (
-        <details className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-gray-700">
-            Extracted answer key ({data.answerKey.length} questions)
-          </summary>
-          <ol className="mt-2 space-y-1.5 text-sm">
-            {data.answerKey.map((k) => (
-              <li key={k.index}>
-                <span className="text-gray-500">{k.index + 1}.</span>{" "}
-                <span className="text-gray-700">{k.title}</span>
-                <div className="ps-5 text-green-700">
-                  {k.answer ? `→ ${k.answer}` : "→ (no answer found in PDF)"}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </details>
+        <AnswerKeyEditor
+          examId={examId}
+          answerKey={data.answerKey}
+          onSaved={onChanged}
+        />
       )}
 
       {data.grades.length === 0 ? (

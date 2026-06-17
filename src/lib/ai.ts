@@ -334,6 +334,7 @@ export type ExtractedKeyItem = {
   index: number; // matches the exam question's response index
   title: string; // the question text, for the teacher to verify alignment
   answer: string; // the correct answer / marking notes read from the PDF
+  points?: number; // max marks for this question (teacher-settable; 0 = not graded)
 };
 
 const KEY_SCHEMA = {

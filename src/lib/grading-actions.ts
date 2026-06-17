@@ -85,10 +85,12 @@ function parseAnswerKey(raw: unknown): ExtractedKeyItem[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((k) => {
     const o = (k ?? {}) as Record<string, unknown>;
+    const points = Number(o.points);
     return {
       index: Number(o.index) || 0,
       title: String(o.title ?? ""),
       answer: String(o.answer ?? ""),
+      points: Number.isFinite(points) && points >= 0 ? points : undefined,
     };
   });
 }
@@ -162,16 +164,23 @@ export async function uploadAnswerKey(
       questions,
       language: exam.language,
     });
+    // Seed each question's points from the Google Form's value; the teacher can
+    // then adjust them in the panel (e.g. raise an essay imported as 0 points).
+    const maxByIndex = new Map(questions.map((q) => [q.index, q.maxPoints]));
+    const keyWithPoints: ExtractedKeyItem[] = key.map((k) => ({
+      ...k,
+      points: maxByIndex.get(k.index) ?? 0,
+    }));
     await prisma.exam.update({
       where: { id: examId },
       data: {
-        answerKey: key as unknown as Prisma.InputJsonValue,
+        answerKey: keyWithPoints as unknown as Prisma.InputJsonValue,
         answerKeyFileName: file.name,
         answerKeyUploadedAt: new Date(),
       },
     });
     revalidatePath(`/teacher/exams/${examId}`);
-    return { ok: true, key };
+    return { ok: true, key: keyWithPoints };
   } catch (e) {
     console.error("Answer-key extraction failed:", e);
     return {
@@ -181,6 +190,40 @@ export async function uploadAnswerKey(
           : "Failed to read the PDF. Check your API key and try again.",
     };
   }
+}
+
+export type SaveKeyPointsResult =
+  | { ok: true; answerKey: ExtractedKeyItem[] }
+  | { error: string };
+
+// Update the per-question max marks on the stored answer key. The teacher sets
+// how much each question is worth; the next grading pass (and the totals) use
+// these values. Set a question to 0 to leave it ungraded (e.g. name / class).
+export async function saveAnswerKeyPoints(
+  examId: string,
+  updates: { index: number; points: number }[],
+): Promise<SaveKeyPointsResult> {
+  const teacher = await requireRole("TEACHER");
+  const exam = await ownedExam(examId, teacher.id);
+  if (!exam) return { error: "Exam not found." };
+
+  const answerKey = parseAnswerKey(exam.answerKey);
+  if (answerKey.length === 0) return { error: "Upload an answer key first." };
+
+  const byIndex = new Map(updates.map((u) => [u.index, u.points]));
+  const next = answerKey.map((k) => {
+    if (!byIndex.has(k.index)) return k;
+    let p = Number(byIndex.get(k.index));
+    if (!Number.isFinite(p) || p < 0) p = 0;
+    return { ...k, points: p };
+  });
+
+  await prisma.exam.update({
+    where: { id: examId },
+    data: { answerKey: next as unknown as Prisma.InputJsonValue },
+  });
+  revalidatePath(`/teacher/exams/${examId}`);
+  return { ok: true, answerKey: next };
 }
 
 export type GradeBatchResult =
@@ -271,6 +314,15 @@ export async function gradeNextBatch(
   }
 
   const keyByIndex = new Map(answerKey.map((k) => [k.index, k.answer]));
+  // Grade against the teacher-set points (fall back to the form's value), so a
+  // question imported as 0 points can be made worth marks and actually graded.
+  const pointsByIndex = new Map(
+    answerKey.map((k) => [k.index, k.points]),
+  );
+  const gradingQuestions = questions.map((q) => ({
+    ...q,
+    maxPoints: pointsByIndex.get(q.index) ?? q.maxPoints,
+  }));
   const size = Math.min(Math.max(batchSize, 1), 20);
 
   // Skip responses that already have a saved grade (resumable).
@@ -287,7 +339,7 @@ export async function gradeNextBatch(
   // Grade the batch concurrently — the main speed-up over the old sequential loop.
   const results = await Promise.allSettled(
     batch.map((r) =>
-      gradeOneResponse(examId, exam.language, questions, keyByIndex, r),
+      gradeOneResponse(examId, exam.language, gradingQuestions, keyByIndex, r),
     ),
   );
   for (const [i, result] of results.entries()) {
