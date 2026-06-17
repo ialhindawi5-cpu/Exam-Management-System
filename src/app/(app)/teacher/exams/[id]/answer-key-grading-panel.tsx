@@ -556,7 +556,6 @@ function StudentGradeCard({
           <Input
             type="number"
             min="0"
-            max={grade.maxScore}
             step="0.5"
             value={totalInput}
             onChange={(e) => {
@@ -586,7 +585,6 @@ function StudentGradeCard({
                   <Input
                     type="number"
                     min="0"
-                    max={m.maxPoints}
                     step="0.5"
                     value={scores[m.index] ?? ""}
                     onChange={(e) => setScore(m.index, e.target.value)}

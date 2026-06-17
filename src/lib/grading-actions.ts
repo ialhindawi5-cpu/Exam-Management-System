@@ -410,7 +410,9 @@ export async function saveGradeEdits(
     if (!editByIndex.has(m.index)) return m;
     let score = Number(editByIndex.get(m.index));
     if (!Number.isFinite(score)) score = 0;
-    score = Math.max(0, Math.min(m.maxPoints, score));
+    // Only floor at 0 — the teacher may award marks beyond the form's point
+    // value (e.g. for questions the Google Form imported as 0 points).
+    score = Math.max(0, score);
     return { ...m, score };
   });
   const computed = next.reduce((s, m) => s + m.score, 0);
@@ -418,7 +420,7 @@ export async function saveGradeEdits(
   // Use the explicit total when provided (and valid), else the per-question sum.
   let totalScore = computed;
   if (totalOverride !== undefined && Number.isFinite(totalOverride)) {
-    totalScore = Math.max(0, Math.min(row.maxScore, totalOverride));
+    totalScore = Math.max(0, totalOverride);
   }
 
   const edited =
