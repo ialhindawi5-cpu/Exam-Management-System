@@ -20,6 +20,14 @@ export const metadata: Metadata = {
   title: "Exam Management System",
   description:
     "Exam management for teachers — question bank, auto/manual grading, and Excel/Word reports.",
+  // Tab icon is served dynamically from the branding logo uploaded at
+  // /admin/settings (falls back to /favicon.ico when none is set).
+  icons: {
+    icon: [
+      { url: "/api/favicon" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+  },
 };
 
 export default function RootLayout({
