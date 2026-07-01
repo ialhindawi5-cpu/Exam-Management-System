@@ -34,11 +34,21 @@ export const getSchoolBranding = cache(
   },
 );
 
-// Resolve branding for a user: their school's branding, else the global default.
+// Resolve branding for a user: their school's branding, falling back to the
+// global default per-field. This matters for the logo: a school can have a name
+// (always set) but no logo, in which case we still want the global logo uploaded
+// at /admin/settings to show in the header rather than nothing.
 export async function getBrandingForSchool(
   schoolId: string | null,
 ): Promise<AppSettings> {
-  return (await getSchoolBranding(schoolId)) ?? (await getSettings());
+  const global = await getSettings();
+  const school = await getSchoolBranding(schoolId);
+  if (!school) return global;
+  return {
+    schoolName: school.schoolName ?? global.schoolName,
+    logoDataUrl: school.logoDataUrl ?? global.logoDataUrl,
+    themeColor: school.themeColor ?? global.themeColor,
+  };
 }
 
 // Parse a data URL into the parts ExcelJS / docx need. Returns null if invalid.
